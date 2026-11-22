@@ -1,0 +1,19 @@
+# Build outputs
+*.love
+build/
+dist/
+
+# Local dev captures
+screenshots/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+
+# Claude Code local settings
+.claude/settings.local.json
