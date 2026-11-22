@@ -5,5 +5,6 @@
 - Drawing/input lives only in `src/view/`, `src/scenes/`, `src/app.lua`.
 - UI positions, camera and colors go in `src/config/layout.lua` (the user tweaks these by hand); do not hardcode screen positions elsewhere when avoidable.
 - Balance numbers go in `src/data/`. After changing them, run `lovec tools/sim 300` and report the win rates.
+- Any change to `trajectory.lua` / `shot_model.lua` algorithms: run `lovec tools/bench` (~15 s) and show the user the speed + accuracy tables from `tools/bench/results.md`, before vs after.
 - Verify visual changes with a dev screenshot (`--shot`, see `src/dev.lua`); output lands in `%APPDATA%\LOVE\rally_academy\screenshots\`.
 - Design doc (rules source of truth): https://claude.ai/artifact/EqpHxhQEHdQG2t7RYCGmgh

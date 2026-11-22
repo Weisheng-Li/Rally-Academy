@@ -35,6 +35,7 @@ src/view/               Drawing + UI (only layer that uses love.graphics).
 src/scenes/             Title and match scenes: glue between core and view.
 src/app.lua             Canvas scaling, scene switching, dev flags.
 tools/sim/              Headless AI-vs-AI balance simulation.
+tools/bench/            Trajectory/shot-model speed + accuracy benchmark.
 assets/                 Fonts and sprites (placeholders for now).
 ```
 
@@ -47,6 +48,13 @@ Balance simulation (runs core only, prints win rates):
 
 ```powershell
 & "C:\Program Files\LOVE\lovec.exe" tools/sim 300
+```
+
+Trajectory benchmark (speed and accuracy of each algorithm config vs a high-precision
+reference; writes `tools/bench/results.md`):
+
+```powershell
+& "C:\Program Files\LOVE\lovec.exe" tools/bench
 ```
 
 Automated screenshots (saved to `%APPDATA%\LOVE\rally_academy\screenshots\shot.png`):
