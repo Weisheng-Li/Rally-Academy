@@ -5,6 +5,7 @@
 -- longer recovery.
 local V = require("src.core.vec")
 local Body = require("src.core.body")
+local Bal = require("src.data.balance")
 
 local Athlete = {}
 Athlete.__index = Athlete
@@ -22,12 +23,16 @@ function Athlete.new(def, side)
   self.delay = 0                   -- seconds before starting to move
   self.speedMul = 1                -- >1 when lunging to make it in time
   self.pose = nil                  -- { state, x, y, h } contact the racket is reaching for (nil = ready)
+  self.offBalance = 0              -- 0 = set and balanced, 1 = completely off balance
   return self
 end
 
 ---------------------------------------------------------------------------- stat -> numbers
-function Athlete:speed() return 2.25 + 0.2 * self.stats.speed end              -- m/s, forward
-function Athlete:reaction() return 0.36 - 0.022 * self.stats.reaction end       -- s
+function Athlete:baseSpeed() return 2.25 + 0.2 * self.stats.speed end          -- m/s when balanced
+function Athlete:speed() return self:baseSpeed() * (1 - Bal.speedLoss * self.offBalance) end
+function Athlete:baseReaction() return 0.36 - 0.022 * self.stats.reaction end   -- s when balanced
+function Athlete:reaction() return self:baseReaction() + Bal.reactionAdd * self.offBalance end
+function Athlete:balanceRecovery() return Bal.recoverBase + Bal.recoverPerLevel * self.stats.balance end -- per s
 function Athlete:recoveryPause() return 0.42 - 0.03 * self.stats.balance end    -- s
 function Athlete:stretchPause() return 0.55 - 0.035 * self.stats.balance end   -- s extra at full stretch
 function Athlete:lungeReach() return 0.25 + 0.05 * self.stats.reach end         -- m extra reach by lunging
@@ -85,6 +90,24 @@ function Athlete:placeAt(pos)
   self.dest = nil
   self.delay = 0
   self.pose = nil
+  self.offBalance = 0
+end
+
+-- Push the off-balance meter up (clamped to 1).
+function Athlete:unsettle(amount)
+  self.offBalance = math.min(1, self.offBalance + amount)
+end
+
+-- Is the athlete currently heading away from point p (so a ball there wrong-foots them)?
+function Athlete:movingAwayFrom(p)
+  if not self.dest or self.delay > 0 then return false end
+  local mx, my = self.dest.x - self.pos.x, self.dest.y - self.pos.y
+  local ml = math.sqrt(mx * mx + my * my)
+  if ml < 0.3 then return false end
+  local px, py = p.x - self.pos.x, p.y - self.pos.y
+  local pl = math.sqrt(px * px + py * py)
+  if pl < 0.3 then return false end
+  return (mx * px + my * py) / (ml * pl) < -0.2     -- pointing more than ~100 degrees apart
 end
 
 function Athlete:moveTo(dest, delay, speedMul)
@@ -96,6 +119,7 @@ end
 function Athlete:isMoving() return self.dest ~= nil and self.delay <= 0 end
 
 function Athlete:update(dt)
+  self.offBalance = math.max(0, self.offBalance - self:balanceRecovery() * dt)
   if not self.dest then return end
   if self.delay > 0 then
     local used = math.min(self.delay, dt)

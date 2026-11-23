@@ -11,6 +11,7 @@ local V = require("src.core.vec")
 local Court = require("src.core.court")
 local Shots = require("src.core.shots")
 local AI = require("src.core.ai")
+local Bal = require("src.data.balance")
 
 local Rally = {}
 Rally.__index = Rally
@@ -56,7 +57,7 @@ function Rally:_buildOptions(d)
   local hitter = self.players[d.hitterKey]
   local recv = self.players[other(d.hitterKey)]
   local ctx = { stats = hitter.stats, from = d.from, h0 = d.h0, contact = d.contact,
-                incoming = d.incoming, maxSpeed = hitter:maxLaunchSpeed() }
+                incoming = d.incoming, offBalance = hitter.offBalance, maxSpeed = hitter:maxLaunchSpeed() }
   d.ctx = ctx
   local pause = self:_recoveryPause(hitter, d)
   local options = {}
@@ -155,6 +156,7 @@ function Rally:commit(index, spot)
   elseif res.outcome ~= "in" then
     recv:moveTo(recv:arrival(landing, res.time, Shots.data.earlySlack).bodyDest, recv:startDelay())
   else
+    local wrongFooted = recv:movingAwayFrom(landing)
     local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
     if a.state == "winner" then
       info.outcome = "winner"
@@ -180,7 +182,12 @@ function Rally:commit(index, spot)
         if a2.state ~= "stretched" then
           a2.bodyDest = recv:hittingSpot(pt)       -- stand beside/behind the actual contact
         end
-        info.next = { contact = a2, from = pt, h0 = hh, incoming = o.shotId }
+        -- how much this shot unsettles the receiver (applied at their contact)
+        local causes = {}
+        if a2.stretch > 0 then causes[#causes + 1] = { "lunge", Bal.stretchGain * a2.stretch } end
+        if wrongFooted then causes[#causes + 1] = { "wrong-foot", Bal.wrongFootGain } end
+        if o.shotId == "smash" then causes[#causes + 1] = { "smash", Bal.smashGain } end
+        info.next = { contact = a2, from = pt, h0 = hh, incoming = o.shotId, unsettle = causes }
         endTime = tc
         local delay = recv:startDelay()
         local bx, by = a2.bodyDest.x - recv.pos.x, a2.bodyDest.y - recv.pos.y
@@ -224,6 +231,17 @@ end
 function Rally:_resolveFlight()
   local f = self.flightInfo
   if f.outcome == "return" then
+    local recv = self.players[f.receiverKey]
+    local total, names = 0, {}
+    for _, c in ipairs(f.next.unsettle or {}) do
+      recv:unsettle(c[2])
+      total = total + c[2]
+      names[#names + 1] = c[1]
+    end
+    if total > 0 then
+      self:_emit({ type = "unsettle", key = f.receiverKey, who = recv.name, amount = total,
+                   causes = table.concat(names, ", "), level = recv.offBalance })
+    end
     self:_beginDecision(f.receiverKey, "rally", f.next)
     return
   end

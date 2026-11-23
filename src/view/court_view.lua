@@ -5,6 +5,7 @@ local Layout = require("src.config.layout")
 local Draw = require("src.view.draw")
 local Figure = require("src.view.figure")
 local Body = require("src.core.body")
+local Bal = require("src.data.balance")
 
 local CourtView = {}
 local C = Layout.colors
@@ -76,6 +77,17 @@ function CourtView.drawAthlete(cam, a, color, alpha)
 
   Draw.color(C.shadow, 0.35 * alpha)
   love.graphics.ellipse("fill", x, y, w * 0.8, w * 0.3)
+
+  -- off-balance bar under the feet (empty = balanced, full red = completely off balance)
+  if a.offBalance then
+    local bw = math.max(16, w * 3)
+    local bx, by = math.floor(x - bw / 2), math.floor(y + 3)
+    Draw.color(C.panel, 0.9 * alpha)
+    love.graphics.rectangle("fill", bx - 1, by - 1, bw + 2, 4)
+    local ob = a.offBalance
+    Draw.color(ob >= Bal.restrictAt and C.bad or C.ok, alpha)
+    love.graphics.rectangle("fill", bx, by, math.floor(bw * ob + 0.5), 2)
+  end
 
   -- legs, torso (top = shoulder), head
   local legH = bh * 0.42

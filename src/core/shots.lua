@@ -4,6 +4,7 @@
 local Data = require("src.data.shots")
 local Traj = require("src.core.trajectory")
 local SM = require("src.core.shot_model")
+local Bal = require("src.data.balance")
 
 local Shots = { data = Data }
 
@@ -43,7 +44,7 @@ end
 local function isSided(from) return math.abs(from.x) > 0.5 end
 
 -- ctx: { stats, from = ground pos, h0, contact = {state, stretch}, incoming = shotId|nil,
---        maxSpeed, court = landing area (optional) }
+--        offBalance = 0..1, maxSpeed, court = landing area (optional) }
 function Shots.evaluate(ctx, target, shotId)
   local def = Data.types[shotId]
   local stats = ctx.stats
@@ -65,9 +66,11 @@ function Shots.evaluate(ctx, target, shotId)
   if inc ~= 1 then
     factor("Returning a " .. Data.types[ctx.incoming].name:lower(), string.format("wobble x%.2f", inc), "bad")
   end
-  local mul = tech * tm * inc
-  local bw = Data.baseWobble
-  local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul }
+  local ob = ctx.offBalance or 0
+  local obMul = 1 + Bal.wobbleAdd * ob
+  if ob >= 0.05 then
+    factor(string.format("Off balance %d%%", math.floor(ob * 100 + 0.5)), string.format("wobble x%.2f", obMul), "bad")
+  end
 
   local from = ctx.from
   local dx, dy = target.x - from.x, target.y - from.y
@@ -83,6 +86,26 @@ function Shots.evaluate(ctx, target, shotId)
     name = (cross and "Cross " or "Straight ") .. def.name:lower()
   end
 
+  -- Late (stretched) or badly off balance: only straight and defensive shots are easy.
+  local late = not def.serve and (ctx.contact.state == "stretched" or ob >= Bal.restrictAt)
+  local lateMul = 1
+  local lateReason
+  if late and shotId == "smash" then
+    lateReason = "Too late / off balance to smash"
+  elseif late and cross then
+    if lvl < Bal.crossMinTechnique then
+      lateReason = string.format("Too late for a cross shot (needs %s Lv%d)", Data.skillNames[def.skill],
+        Bal.crossMinTechnique)
+    else
+      lateMul = Bal.lateCrossWobble
+      factor("Late cross shot", string.format("wobble x%.2f", lateMul), "bad")
+    end
+  end
+
+  local mul = tech * tm * inc * obMul * lateMul
+  local bw = Data.baseWobble
+  local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul }
+
   local base = { shotId = shotId, def = def, name = name, cross = cross, factors = factors,
                  wobble = wobble, wobbleMul = mul, distance = dist }
   local function unavailable(reason)
@@ -92,6 +115,7 @@ function Shots.evaluate(ctx, target, shotId)
     return base
   end
 
+  if lateReason then return unavailable(lateReason) end
   if def.minContact and h0 < def.minContact then
     return unavailable(string.format("Too low to smash (contact %.1f m)", h0))
   end
@@ -107,8 +131,8 @@ function Shots.evaluate(ctx, target, shotId)
       v = v - Data.smashSpeedStep
     end
     if not sol then return unavailable("Can't smash over the net from here") end
-    factor(string.format("Power Lv%d (max %d m/s)", stats.power, maxV),
-      v < maxV and string.format("%d m/s (net limits)", v) or string.format("%d m/s", v), nil)
+    factor(string.format("Power Lv%d", stats.power),
+      v < maxV and string.format("%d of %d m/s (net)", v, maxV) or string.format("%d m/s", v), nil)
   else
     sol = Traj.solve(h0, dist, netS, def.spec)
     if not sol then return unavailable("No way to play this from here") end

@@ -29,6 +29,9 @@ function Hud:onEvents(match, events)
       local col = ev.winner == "near" and C.good or C.bad
       self:push(string.format("Point %s - %s", who, REASON[ev.reason]), col)
       self.popups[#self.popups + 1] = { text = REASON[ev.reason], pos = ev.pos, t = 0, col = col }
+    elseif ev.type == "unsettle" then
+      local col = ev.key == "near" and C.bad or C.good
+      self:push(string.format("%s: off bal %d%% (%s)", ev.who, math.floor(ev.level * 100 + 0.5), ev.causes), col)
     end
   end
 end

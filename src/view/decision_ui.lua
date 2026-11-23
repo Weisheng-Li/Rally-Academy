@@ -112,14 +112,25 @@ local function drawRing(cam, pos, r, filled)
   love.graphics.polygon("line", pts)
 end
 
+-- Path color = how long the shuttle takes to land: fast (hard) shots one color,
+-- slow (floaty) shots the other, blended in between. No reading of the opponent.
+function DecisionUI.flightColor(t)
+  local fc = Layout.flightColors
+  local u = math.max(0, math.min(1, (t - fc.fastTime) / (fc.slowTime - fc.fastTime)))
+  local a, b = fc.fast, fc.mid
+  if u > 0.5 then a, b, u = fc.mid, fc.slow, u - 0.5 end
+  u = u * 2
+  return { a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u, a[3] + (b[3] - a[3]) * u }
+end
+
 function DecisionUI:_drawPath(o)
   local path = o.eval.path
   if not path then return end
-  Draw.color(C.text, 0.75)
+  Draw.color(DecisionUI.flightColor(o.eval.flight), 0.95)
   for i = 2, #path - 1, 2 do
     local p = path[i]
     local x, y = self.cam:project(p.x, p.y, p.h)
-    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 2, 2)
   end
 end
 
@@ -223,10 +234,15 @@ function DecisionUI:drawOverlay(rally)
   -- contact badge over the hitter
   local ct = d.contact
   local label = CONTACT_LABEL[ct.state]
+  local x, y = cam:project(hitter.pos.x, hitter.pos.y, require("src.core.body").MAX_REACH + 0.4)
   if label then
     if ct.state == "stretched" then label = string.format("%s %d%%", label, math.floor(ct.stretch * 100 + 0.5)) end
-    local x, y = cam:project(hitter.pos.x, hitter.pos.y, require("src.core.body").MAX_REACH + 0.4)
     Draw.text(label, x - 50, y, ct.state == "early" and C.good or C.bad, Assets.fonts.normal, "center", 100)
+    y = y - 11
+  end
+  if hitter.offBalance >= 0.05 then
+    Draw.text(string.format("OFF BALANCE %d%%", math.floor(hitter.offBalance * 100 + 0.5)), x - 60, y,
+      C.bad, Assets.fonts.normal, "center", 120)
   end
 
   local hovered = self.mode == "target" and self.hover and d.options[self.hover]
@@ -264,7 +280,11 @@ function DecisionUI:_drawTooltip(rally, o)
     local st = RECEIVER[a.state]
     if a.state == "stretched" then st = string.format("%s %d%%", st, math.floor(a.stretch * 100 + 0.5)) end
     local col = (a.state == "winner" or a.state == "stretched") and C.good or (a.state == "early" and C.bad or C.ok)
-    add("Opponent", st, col)
+    add("Opponent reach", st, col)
+    local recv = rally.players[rally.decision.hitterKey == "near" and "far" or "near"]
+    if recv.offBalance >= 0.05 then
+      add("Opponent off balance", pct(recv.offBalance), C.good)
+    end
   end
 
   local w = tt.width

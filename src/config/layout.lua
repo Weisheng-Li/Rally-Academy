@@ -36,6 +36,14 @@ return {
   -- Player / racket / shuttle sizes live in src/core/body.lua (shared with the rules and
   -- checked by tests/), not here.
 
+  -- Trajectory preview color by flight time: fastTime or quicker = fast color,
+  -- slowTime or longer = slow color, passing through mid halfway (red -> white -> blue).
+  flightColors = {
+    fast = { 1.00, 0.30, 0.25 }, fastTime = 0.6,   -- red: hard, quick shots (smash, drive)
+    mid  = { 0.92, 0.92, 0.92 },                    -- white: medium-paced shots (drops)
+    slow = { 0.40, 0.65, 1.00 }, slowTime = 2.0,   -- blue: floaty shots (clear, lift)
+  },
+
   colors = {
     bg         = { 0.10, 0.12, 0.16 },
     floor      = { 0.20, 0.24, 0.30 },
