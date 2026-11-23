@@ -91,6 +91,9 @@ end
 
 local HALF_W, LEN = Court.HALF_WIDTH_SINGLES, Court.LENGTH
 
+-- Default landing area: the receiver's whole singles half.
+SM.FULL_HALF = { xMin = -HALF_W, xMax = HALF_W, yMin = 0, yMax = LEN }
+
 -- Distance along a ground ray until it leaves the receiver's half (singles lines).
 local function exitDistance(cx, cy, ux, uy, recvSide)
   local sBase = (recvSide * LEN - cy) / uy
@@ -154,16 +157,26 @@ function SM.evaluate(contact, h0, target, spec, wobble, cfg, opts)
   local recvSide = target.y < 0 and -1 or 1
   local netS = -contact.y / uy
 
-  local sol = Traj.solve(h0, dist, netS, spec, cfg)
+  local sol = opts.solution or Traj.solve(h0, dist, netS, spec, cfg)
   if not sol then return { available = false, reason = "no trajectory" } end
   if not sol.clears then return { available = false, reason = "can't clear the net", solution = sol } end
+
+  -- Allowed landing area on the receiver's side (|y| measured from the net).
+  local court = opts.court or SM.FULL_HALF
+  local function classify(px, py)
+    local ay = py * recvSide
+    if ay > court.yMax then return "long" end
+    if px < court.xMin or px > court.xMax then return "wide" end
+    if ay < court.yMin then return "short" end
+    return "in"
+  end
 
   local sur
   if method == "surrogate" then
     sur = buildSurrogate(sol, h0, netS, wobble, opts.probeStep or SM.defaults.probeStep, cfg)
   end
 
-  local counts = { net = 0, long = 0, wide = 0, ["in"] = 0 }
+  local counts = { net = 0, long = 0, wide = 0, short = 0, ["in"] = 0 }
   local landings = opts.keepLandings and {} or nil
   local cos, sin = math.cos, math.sin
 
@@ -193,12 +206,14 @@ function SM.evaluate(contact, h0, target, spec, wobble, cfg, opts)
 
     if isNet then
       counts.net = counts.net + 1
-    elseif land > exitS then
+    elseif land == math.huge then
       counts[exitKind] = counts[exitKind] + 1
     else
-      counts["in"] = counts["in"] + 1
-      if landings then
-        landings[#landings + 1] = { x = contact.x + wx * land, y = contact.y + wy * land, time = time }
+      local px, py = contact.x + wx * land, contact.y + wy * land
+      local kind = classify(px, py)
+      counts[kind] = counts[kind] + 1
+      if landings and kind == "in" then
+        landings[#landings + 1] = { x = px, y = py, time = time }
       end
     end
   end
@@ -207,8 +222,9 @@ function SM.evaluate(contact, h0, target, spec, wobble, cfg, opts)
   return {
     available = true,
     success = counts["in"] / n,
-    pNet = counts.net / n, pLong = counts.long / n, pWide = counts.wide / n,
-    solution = sol, distance = dist, landings = landings,
+    pNet = counts.net / n, pLong = counts.long / n, pWide = counts.wide / n, pShort = counts.short / n,
+    solution = sol, distance = dist, landings = landings, netS = netS, dir = { x = ux, y = uy },
+    classify = classify,
   }
 end
 

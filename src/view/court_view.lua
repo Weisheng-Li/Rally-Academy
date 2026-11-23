@@ -3,6 +3,8 @@
 local Court = require("src.core.court")
 local Layout = require("src.config.layout")
 local Draw = require("src.view.draw")
+local Figure = require("src.view.figure")
+local Body = require("src.core.body")
 
 local CourtView = {}
 local C = Layout.colors
@@ -61,43 +63,52 @@ function CourtView.drawNet(cam)
   love.graphics.rectangle("fill", rx - 1, rt, 2, lg - rt)
 end
 
+-- Fixed upright sprite sized from core/body.lua (via Figure). The racket handle is
+-- attached at the right shoulder and rotates in 2D to point at the shuttle's height.
 function CourtView.drawAthlete(cam, a, color, alpha)
-  local x, y, s = cam:project(a.pos.x, a.pos.y, 0)
-  local cfg = Layout.actor
-  local h = cfg.bodyHeight * cam.hs * s
-  local w = math.max(3, cfg.width * s)
+  local pose = a.pose
+  local h = pose and (pose.h or (pose.state == "stretched" and Body.MIN_REACH)) or nil
+  local f = Figure.athlete(cam, a, h)
+  local x, y = f.feetX, f.feetY
+  local bh, w = f.bodyH, f.bodyW
+  local torsoTop = Body.SHOULDER_HEIGHT / Body.HEIGHT
   alpha = alpha or 1
 
   Draw.color(C.shadow, 0.35 * alpha)
   love.graphics.ellipse("fill", x, y, w * 0.8, w * 0.3)
 
-  -- legs, torso, head
-  local legH = h * 0.42
+  -- legs, torso (top = shoulder), head
+  local legH = bh * 0.42
   Draw.color({ 0.15, 0.15, 0.2 }, alpha)
-  love.graphics.rectangle("fill", math.floor(x - w * 0.4), math.floor(y - legH), math.ceil(w * 0.8), math.ceil(legH))
+  love.graphics.rectangle("fill", x - w * 0.4, y - legH, w * 0.8, legH)
   Draw.color(color, alpha)
-  love.graphics.rectangle("fill", math.floor(x - w * 0.5), math.floor(y - h * 0.82), math.ceil(w), math.ceil(h * 0.42))
+  love.graphics.rectangle("fill", x - w * 0.5, y - bh * torsoTop, w, bh * (torsoTop - 0.42))
   Draw.color({ 0.95, 0.80, 0.65 }, alpha)
-  love.graphics.circle("fill", x, y - h * 0.9, w * 0.32)
+  local headR = bh * (1 - torsoTop) / 2
+  love.graphics.circle("fill", x, y - bh + headR, headR)
 
-  -- racket on the player's right hand side (screen right for near, screen left for far)
-  local dir = a.side == 1 and 1 or -1
+  -- racket: handle from the shoulder to the head, oval head ending at the tip
   Draw.color({ 0.85, 0.85, 0.9 }, alpha)
-  local hx, hy = x + dir * w * 0.55, y - h * 0.7
-  love.graphics.line(hx, hy, hx + dir * w * 0.3, hy - h * 0.25)
-  love.graphics.circle("line", hx + dir * w * 0.38, hy - h * 0.33, math.max(1.5, w * 0.22))
+  love.graphics.setLineWidth(1)
+  love.graphics.line(f.shoulderX, f.shoulderY, f.headStartX, f.headStartY)
+  love.graphics.push()
+  love.graphics.translate(f.headCX, f.headCY)
+  love.graphics.rotate(f.headAngle)
+  love.graphics.ellipse("line", 0, 0, f.headLen / 2, f.headWidth / 2)
+  love.graphics.pop()
 end
 
 function CourtView.drawShuttleShadow(cam, sh)
-  local x, y, s = cam:project(sh.pos.x, sh.pos.y, 0)
+  local x, y = cam:project(sh.pos.x, sh.pos.y, 0)
+  local r = Figure.shuttleRadius(Figure.scale(cam, sh.pos.x, sh.pos.y))
   Draw.color(C.shadow)
-  love.graphics.ellipse("fill", x, y, math.max(1.5, 0.12 * s), math.max(1, 0.05 * s))
+  love.graphics.ellipse("fill", x, y, r * 1.2, r * 0.5)
 end
 
 function CourtView.drawShuttle(cam, sh)
-  local x, y, s = cam:project(sh.pos.x, sh.pos.y, sh.h)
+  local f = Figure.shuttle(cam, sh)
   Draw.color(C.shuttle)
-  love.graphics.circle("fill", x, y, math.max(1.5, 0.07 * s))
+  love.graphics.circle("fill", f.x, f.y, f.r)
 end
 
 -- Draws everything in depth order (far to near).

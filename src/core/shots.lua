@@ -1,65 +1,190 @@
--- Shot evaluation: turns (stats, where from, where to, timing) into success %, flight time
--- and a human-readable breakdown. Pure Lua (no love.*).
+-- Shot evaluation for the game: stats + situation -> physics shot model -> success %,
+-- breakdown factors, preview path and landing spread. Also executes the one real hit.
+-- Pure Lua (no love.*).
 local Data = require("src.data.shots")
+local Traj = require("src.core.trajectory")
+local SM = require("src.core.shot_model")
 
 local Shots = { data = Data }
 
-local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+local function lerp(a, b, t) return a + (b - a) * t end
 
-function Shots.typeFor(fromDepth, toDepth)
-  return Data.matrix[fromDepth][toDepth]
+function Shots.typeFor(fromDepth, toDepth) return Data.matrix[fromDepth][toDepth] end
+
+-- contact = { state = "early"|"ontime"|"stretched", stretch = 0..1 }
+function Shots.contactHeight(depth, contact)
+  local t = Data.contactHeight[depth]
+  if contact.state == "early" then return t.early end
+  if contact.state == "stretched" then return lerp(t.ontime, t.stretched, contact.stretch) end
+  return t.ontime
 end
 
-function Shots.contactHeight(depth, timing)
-  return Data.contactHeight[depth][timing or "ontime"]
+function Shots.techniqueMul(level)
+  local m = Data.techniqueMul
+  return m.step ^ (m.pivot - level)
 end
 
--- Receiver's timing when they get to the shuttle.
-function Shots.timingFromSlack(slack)
-  if slack >= Data.slackEarly then return "early" end
-  if slack >= 0 then return "ontime" end
-  return "late"
+function Shots.timingMul(contact)
+  local m = Data.timingMul
+  if contact.state == "early" then return m.early end
+  if contact.state == "stretched" then return lerp(1, m.stretchedMax, contact.stretch) end
+  return m.ontime
 end
 
--- Like timingFromSlack, but also says when they cannot reach it at all.
-function Shots.reachState(slack)
-  if slack < Data.slackReach then return "winner" end
-  return Shots.timingFromSlack(slack)
+-- Convert a recorded (s, z) flight to world points {x, y, h} along a ground direction.
+function Shots.worldPath(from, dx, dy, pts)
+  local out = {}
+  for i = 1, #pts, 2 do
+    out[#out + 1] = { x = from.x + dx * pts[i], y = from.y + dy * pts[i], h = math.max(0, pts[i + 1]) }
+  end
+  return out
 end
 
-Shots.REACH_LABEL = { winner = "Can't reach", late = "Late", ontime = "On time", early = "Comfortable" }
+local function isSided(from) return math.abs(from.x) > 0.5 end
 
--- stats: athlete stat levels; from/to: world positions; timing: "early"|"ontime"|"late".
-function Shots.evaluate(stats, from, to, shotId, timing, isServe)
+-- ctx: { stats, from = ground pos, h0, contact = {state, stretch}, incoming = shotId|nil,
+--        maxSpeed, court = landing area (optional) }
+function Shots.evaluate(ctx, target, shotId)
   local def = Data.types[shotId]
-  local tm = Data.timing[timing or "ontime"]
+  local stats = ctx.stats
   local lvl = stats[def.skill] or 5
+  local factors = {}
+  local function factor(label, value, effect) factors[#factors + 1] = { label = label, value = value, effect = effect } end
 
-  local sided = (not isServe) and math.abs(from.x) > 0.5
-  local cross = sided and ((from.x > 0) ~= (to.x > 0)) or false
+  local tech = Shots.techniqueMul(lvl)
+  factor(string.format("%s technique Lv%d", Data.skillNames[def.skill], lvl), string.format("wobble x%.2f", tech),
+    tech < 1 and "good" or (tech > 1 and "bad" or nil))
+  local tm = Shots.timingMul(ctx.contact)
+  if ctx.contact.state == "early" then
+    factor("Early contact (high)", string.format("wobble x%.2f", tm), "good")
+  elseif ctx.contact.state == "stretched" then
+    factor(string.format("Stretched %d%% (lunge)", math.floor(ctx.contact.stretch * 100 + 0.5)),
+      string.format("wobble x%.2f", tm), "bad")
+  end
+  local inc = (ctx.incoming and Data.incomingMul[ctx.incoming]) or 1
+  if inc ~= 1 then
+    factor("Returning a " .. Data.types[ctx.incoming].name:lower(), string.format("wobble x%.2f", inc), "bad")
+  end
+  local mul = tech * tm * inc
+  local bw = Data.baseWobble
+  local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul }
 
-  local rows = {}
-  local function row(label, value) rows[#rows + 1] = { label = label, value = value } end
-  row("Base " .. def.name:lower(), def.base)
-  row(string.format("%s skill Lv%d", Data.skillNames[def.skill], lvl), (lvl - 5) * Data.skillPerLevel)
-  if cross then row("Cross-court", Data.cross.success) end
-  if tm.success ~= 0 then row(tm.label .. " contact", tm.success) end
-
-  local sum = 0
-  for _, r in ipairs(rows) do sum = sum + r.value end
-
-  local flight = def.flight
-  if def.powerFlight then flight = flight - def.powerFlight * ((stats.power or 5) - 5) end
-  flight = flight * tm.flightMul + tm.flightAdd
-  if cross then flight = flight + Data.cross.flight end
+  local from = ctx.from
+  local dx, dy = target.x - from.x, target.y - from.y
+  local dist = math.sqrt(dx * dx + dy * dy)
+  local ux, uy = dx / dist, dy / dist
+  local netS = -from.y / uy
+  local h0 = ctx.h0
 
   local name = def.name
-  if sided then name = (cross and "Cross " or "Straight ") .. def.name:lower() end
+  local cross = false
+  if not def.serve and isSided(from) then
+    cross = (from.x > 0) ~= (target.x > 0)
+    name = (cross and "Cross " or "Straight ") .. def.name:lower()
+  end
 
-  return {
-    shotId = shotId, def = def, name = name, cross = cross,
-    success = clamp(sum, 0.05, 0.99), breakdown = rows, flight = flight,
-  }
+  local base = { shotId = shotId, def = def, name = name, cross = cross, factors = factors,
+                 wobble = wobble, wobbleMul = mul, distance = dist }
+  local function unavailable(reason)
+    base.available = false
+    base.reason = reason
+    base.success = 0
+    return base
+  end
+
+  if def.minContact and h0 < def.minContact then
+    return unavailable(string.format("Too low to smash (contact %.1f m)", h0))
+  end
+
+  local maxV = ctx.maxSpeed
+  local sol
+  if def.usesPower then
+    local v = maxV
+    while v >= 25 do
+      sol = Traj.solve(h0, dist, netS, { kind = "speed", speed = v })
+      if sol and sol.clears then break end
+      sol = nil
+      v = v - Data.smashSpeedStep
+    end
+    if not sol then return unavailable("Can't smash over the net from here") end
+    factor(string.format("Power Lv%d (max %d m/s)", stats.power, maxV),
+      v < maxV and string.format("%d m/s (net limits)", v) or string.format("%d m/s", v), nil)
+  else
+    sol = Traj.solve(h0, dist, netS, def.spec)
+    if not sol then return unavailable("No way to play this from here") end
+    if not sol.clears then return unavailable("Can't clear the net from here") end
+    if sol.speed > maxV + 1e-6 then
+      return unavailable(string.format("Needs %.0f m/s, Power Lv%d gives %d", sol.speed, stats.power, maxV))
+    end
+  end
+
+  local r = SM.evaluate(from, h0, target, def.spec, wobble, nil,
+    { solution = sol, court = ctx.court, keepLandings = true })
+
+  local rec = Traj.fly(h0, sol.speed * math.cos(sol.angle), sol.speed * math.sin(sol.angle), netS, { record = true })
+
+  base.available = true
+  base.success = r.success
+  base.pNet, base.pLong, base.pWide, base.pShort = r.pNet, r.pLong, r.pWide, r.pShort
+  base.solution = sol
+  base.flight = sol.time
+  base.overNet = (sol.netH or 0) - Traj.config.netHeight
+  base.speed = sol.speed
+  base.landings = r.landings
+  base.classify = r.classify
+  base.dir = { x = ux, y = uy }
+  base.path = Shots.worldPath(from, ux, uy, rec.points)
+  return base
+end
+
+---------------------------------------------------------------------------- the real hit
+
+local function normal(rng)
+  local u1, u2 = math.max(1e-12, rng()), rng()
+  return math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2)
+end
+
+-- Fly one real shot with a fresh random wobble.
+-- Returns { outcome = "in"|"net"|"long"|"wide"|"short", landing, time, path, dt }
+function Shots.execute(ctx, ev, rng)
+  local sol, w = ev.solution, ev.wobble
+  local angle = sol.angle + normal(rng) * w.angle
+  local speed = sol.speed * (1 + normal(rng) * w.speed)
+  local phi = normal(rng) * w.dir
+  local c, s = math.cos(phi), math.sin(phi)
+  local wx, wy = ev.dir.x * c - ev.dir.y * s, ev.dir.x * s + ev.dir.y * c
+  local from = ctx.from
+  local netS = -from.y / wy
+  local r = Traj.fly(ctx.h0, speed * math.cos(angle), speed * math.sin(angle), netS,
+    { record = true, stopAtNet = true })
+  local path = Shots.worldPath(from, wx, wy, r.points)
+  local res = { path = path, dt = Traj.config.dt, time = r.time }
+  if r.hitNet then
+    res.outcome = "net"
+    local last = path[#path]
+    res.landing = { x = last.x, y = last.y }
+    return res
+  end
+  res.landing = { x = from.x + wx * r.land, y = from.y + wy * r.land }
+  res.outcome = ev.classify(res.landing.x, res.landing.y)
+  return res
+end
+
+-- Point on a recorded path where the falling shuttle comes down to height h.
+-- Returns ground point, time, actual height.
+function Shots.contactOnPath(path, dt, h)
+  local peak = 1
+  for i = 2, #path do if path[i].h > path[peak].h then peak = i end end
+  for i = math.max(2, peak), #path do
+    if path[i].h <= h then
+      local a, b = path[i - 1], path[i]
+      local f = (a.h - h) / math.max(1e-6, a.h - b.h)
+      f = math.max(0, math.min(1, f))
+      return { x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f }, (i - 2 + f) * dt, h
+    end
+  end
+  local last = path[#path]
+  return { x = last.x, y = last.y }, (#path - 1) * dt, last.h
 end
 
 return Shots

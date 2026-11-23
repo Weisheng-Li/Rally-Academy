@@ -44,6 +44,12 @@ without touching drawing code, and the simulation runs without rendering.
 
 ## Dev tools
 
+Unit tests (geometry: what is drawn matches the model numbers):
+
+```powershell
+& "C:\Program Files\LOVE\lovec.exe" tests
+```
+
 Balance simulation (runs core only, prints win rates):
 
 ```powershell

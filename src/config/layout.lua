@@ -33,7 +33,8 @@ return {
   -- Shot breakdown panel. Shown at leftX when hovering a right-side target, rightX for left-side.
   tooltip = { width = 200, leftX = 4, rightX = 436, y = 84, padding = 5, lineH = 11 },
 
-  actor = { bodyHeight = 1.75, width = 0.42 },
+  -- Player / racket / shuttle sizes live in src/core/body.lua (shared with the rules and
+  -- checked by tests/), not here.
 
   colors = {
     bg         = { 0.10, 0.12, 0.16 },

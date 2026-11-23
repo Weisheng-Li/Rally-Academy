@@ -9,7 +9,7 @@ Hud.__index = Hud
 local C = Layout.colors
 local H = Layout.hud
 
-local REASON = { winner = "WINNER!", out = "OUT!", net = "NET!" }
+local REASON = { winner = "WINNER!", net = "NET!", long = "OUT!", wide = "OUT!", short = "SHORT!" }
 
 function Hud.new(cam)
   return setmetatable({ cam = cam, log = {}, popups = {} }, Hud)

@@ -4,7 +4,7 @@
 --   "pre"    short pause before the serve
 --   "decide" frozen at contact; waiting for commit(optionIndex, recoverySpot)
 --            (AI hitters commit immediately, so only human hitters stay here)
---   "flight" shuttle in the air, athletes moving
+--   "flight" shuttle in the air along its physics path, athletes moving
 --   "point"  shuttle is down, short pause
 --   "done"   rally finished; read rally.result
 local V = require("src.core.vec")
@@ -17,6 +17,8 @@ Rally.__index = Rally
 
 local function other(key) return key == "near" and "far" or "near" end
 Rally.other = other
+
+local ONTIME = { state = "ontime", stretch = 0, slack = 0 }
 
 -- o: { players = {near=Athlete, far=Athlete}, server = "near"|"far", serverScore = n,
 --      human = {near=true}, rng = function() -> [0,1), events = {} }
@@ -38,60 +40,75 @@ function Rally.new(o)
   s:placeAt({ x = sx, y = s.side * 2.3 })
   r:placeAt({ x = -sx, y = r.side * 3.0 })                -- diagonal service court
   self.serveX = sx
-  self.shuttle = { pos = V.copy(s.pos), h = 1.0 }
+  self.shuttle = { pos = V.copy(s.pos), h = Shots.data.serveHeight }
   return self
 end
 
 function Rally:_emit(ev) self.events[#self.events + 1] = ev end
 
-function Rally:_recoveryPause(hitter, decision)
-  return hitter:recoveryPause() + (decision.timing == "late" and Shots.data.latePause or 0)
+function Rally:_recoveryPause(hitter, d)
+  return hitter:recoveryPause() + (d.contact.stretch or 0) * hitter:stretchPause()
 end
+
+---------------------------------------------------------------------------- options
 
 function Rally:_buildOptions(d)
   local hitter = self.players[d.hitterKey]
   local recv = self.players[other(d.hitterKey)]
+  local ctx = { stats = hitter.stats, from = d.from, h0 = d.h0, contact = d.contact,
+                incoming = d.incoming, maxSpeed = hitter:maxLaunchSpeed() }
+  d.ctx = ctx
+  local pause = self:_recoveryPause(hitter, d)
   local options = {}
 
-  local function add(id, label, pos, shotId)
-    local ev = Shots.evaluate(hitter.stats, d.from, pos, shotId, d.timing, d.kind == "serve")
-    local o = { id = id, label = label, pos = pos, shotId = shotId, eval = ev }
-    if d.timing == "late" and ev.def.attacking then
-      o.disabled = "Too late for a " .. ev.def.name:lower()
+  local function add(id, label, pos, shotId, court)
+    ctx.court = court
+    local ev = Shots.evaluate(ctx, pos, shotId)
+    local o = { id = id, label = label, pos = pos, shotId = shotId, eval = ev, court = court,
+                recoverPause = pause, recoverTime = ev.flight or 0 }
+    if not ev.available then
+      o.disabled = ev.reason
+    else
+      o.receiver = recv:arrival(pos, ev.flight, Shots.data.earlySlack)
     end
-    o.receiverSlack = ev.flight - recv:timeToReach(pos)
-    o.receiverState = Shots.reachState(o.receiverSlack)
-    o.recoveryRadius = hitter:speed() * math.max(0, ev.flight - self:_recoveryPause(hitter, d))
     options[#options + 1] = o
   end
 
   if d.kind == "serve" then
     local rs = recv.side
     local rx = (-self.serveX > 0) and 1 or -1
-    add("short_serve", "Short", { x = rx * 1.0, y = rs * 2.3 }, "short_serve")
-    add("long_serve", "Long", { x = rx * 1.0, y = rs * 6.1 }, "long_serve")
+    local court = rx > 0 and { xMin = 0, xMax = Court.HALF_WIDTH_SINGLES, yMin = Court.SHORT_SERVICE, yMax = Court.LENGTH }
+                         or { xMin = -Court.HALF_WIDTH_SINGLES, xMax = 0, yMin = Court.SHORT_SERVICE, yMax = Court.LENGTH }
+    add("short_serve", "Short", { x = rx * 1.0, y = rs * 2.5 }, "short_serve", court)
+    add("long_serve", "Long", { x = rx * 1.0, y = rs * 6.0 }, "long_serve", court)
   else
     for _, z in ipairs(Court.ZONES) do
-      add(z.id, z.label, Court.zonePos(z, recv.side), Shots.typeFor(d.depth, z.depth))
+      add(z.id, z.label, Court.zonePos(z, recv.side), Shots.typeFor(d.depth, z.depth), nil)
     end
   end
   return options
 end
 
-function Rally:_beginDecision(key, kind, timing, slack)
+function Rally:_beginDecision(key, kind, nxt)
+  nxt = nxt or {}
   local hitter = self.players[key]
-  local d = { hitterKey = key, kind = kind, timing = timing or "ontime", slack = slack }
-  d.from = V.copy(hitter.pos)
+  local d = { hitterKey = key, kind = kind }
+  d.contact = nxt.contact or ONTIME
+  d.from = nxt.from and V.copy(nxt.from) or V.copy(hitter.pos)
+  d.h0 = nxt.h0 or Shots.data.serveHeight
   d.depth = Court.depthOf(d.from)
-  d.contactH = (kind == "serve") and 1.0 or Shots.contactHeight(d.depth, d.timing)
+  d.incoming = nxt.incoming
   d.options = self:_buildOptions(d)
   self.decision = d
   self.phase = "decide"
-  self.shuttle = { pos = V.copy(d.from), h = d.contactH }
+  self.shuttle = { pos = V.copy(d.from), h = d.h0 }
 
   if not self.human[key] then
     local i, spot = AI.choose(self, d, self.rng, self.aiProfile)
-    self:commit(i, spot)
+    if not self:commit(i, spot) then
+      -- nothing playable: the shuttle drops
+      self:_endPoint(other(key), "winner", d.from)
+    end
   end
 end
 
@@ -99,22 +116,25 @@ function Rally:isHumanDecision()
   return self.phase == "decide" and self.decision and self.human[self.decision.hitterKey] or false
 end
 
--- Clamp a requested recovery spot to the reachable circle and the hitter's half.
+-- Clamp a requested recovery spot to what the hitter can reach (direction-dependent) and their half.
 function Rally:clampRecovery(option, spot)
-  local d = self.decision
-  local hitter = self.players[d.hitterKey]
-  local c = d.from
-  local dist = V.dist(c, spot)
+  local hitter = self.players[self.decision.hitterKey]
+  local c = hitter.pos
+  local dx, dy = spot.x - c.x, spot.y - c.y
+  local dist = math.sqrt(dx * dx + dy * dy)
   local p = spot
-  if dist > option.recoveryRadius and dist > 0 then
-    p = V.lerp(c, spot, option.recoveryRadius / dist)
+  if dist > 0 then
+    local r = hitter:recoveryRadius(option.recoverTime, option.recoverPause)
+    if dist > r then p = { x = c.x + dx / dist * r, y = c.y + dy / dist * r } end
   end
   return Court.clampToHalf(p, hitter.side)
 end
 
+---------------------------------------------------------------------------- the hit
+
 function Rally:commit(index, spot)
   local d = self.decision
-  local o = d and d.options[index]
+  local o = d and index and d.options[index]
   if not o or o.disabled then return false end
 
   local hitter = self.players[d.hitterKey]
@@ -123,50 +143,60 @@ function Rally:commit(index, spot)
   spot = self:clampRecovery(o, spot or Court.basePos(hitter.side))
 
   local ev = o.eval
-  local jitter = (d.kind == "serve") and 0 or 0.15
-  local land = { x = o.pos.x + (self.rng() * 2 - 1) * jitter, y = o.pos.y + (self.rng() * 2 - 1) * jitter }
-  local flight = ev.flight
-  local startDelay = recv:startDelay()
-  local slack = flight - recv:timeToReach(land)
+  d.ctx.court = o.court
+  local res = Shots.execute(d.ctx, ev, self.rng)
+  local info = { hitterKey = d.hitterKey, receiverKey = recvKey, shotName = ev.name, shotId = o.shotId,
+                 success = ev.success, outcome = res.outcome }
+  local endTime = res.time
+  local landing = res.landing
 
-  local info = { hitterKey = d.hitterKey, receiverKey = recvKey, shotName = ev.name, success = ev.success }
-  local endPos, endH, dur, apex = land, 0, flight, ev.def.apex
-
-  if self.rng() > ev.success then
-    info.outcome = "error"
-    local depth = Court.depthOf(land)
-    if depth == "front" or o.shotId == "smash" then
-      info.errorKind = "net"
-      local f = math.abs(d.from.y) / (math.abs(d.from.y) + math.abs(land.y))
-      endPos = { x = d.from.x + (land.x - d.from.x) * f, y = hitter.side * 0.08 }
-      endH, dur, apex = 1.0, flight * f, apex * 0.3
+  if res.outcome == "net" then
+    endTime = (#res.path - 1) * res.dt
+  elseif res.outcome ~= "in" then
+    recv:moveTo(recv:arrival(landing, res.time, Shots.data.earlySlack).bodyDest, recv:startDelay())
+  else
+    local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
+    if a.state == "winner" then
+      info.outcome = "winner"
+      recv:moveTo(a.bodyDest, recv:startDelay())
+      recv.pose = { state = "stretched" }
     else
-      info.errorKind = "out"
-      endPos = V.copy(land)
-      if depth == "back" then
-        endPos.y = recv.side * (Court.LENGTH + 0.6)
+      -- where (and when) the shuttle is at the receiver's contact height
+      local depth = Court.depthOf(landing)
+      local pt, tc, hh = Shots.contactOnPath(res.path, res.dt, Shots.contactHeight(depth, a))
+      local a2 = recv:arrival(pt, tc, Shots.data.earlySlack)
+      if a2.state == "winner" then
+        -- too slow for a high contact: let it drop to the lowest reachable contact
+        pt, tc, hh = Shots.contactOnPath(res.path, res.dt, Shots.contactHeight(depth, { state = "stretched", stretch = 1 }))
+        a2 = recv:arrival(pt, tc, Shots.data.earlySlack)
+      end
+      if a2.state == "winner" then
+        info.outcome = "winner"
+        recv:moveTo(a2.bodyDest, recv:startDelay())
+        recv.pose = { state = "stretched" }
       else
-        endPos.x = (land.x >= 0 and 1 or -1) * (Court.HALF_WIDTH_SINGLES + 0.5)
+        info.outcome = "return"
+        hh = Shots.contactHeight(Court.depthOf(pt), a2)
+        if a2.state ~= "stretched" then
+          a2.bodyDest = recv:hittingSpot(pt)       -- stand beside/behind the actual contact
+        end
+        info.next = { contact = a2, from = pt, h0 = hh, incoming = o.shotId }
+        endTime = tc
+        local delay = recv:startDelay()
+        local bx, by = a2.bodyDest.x - recv.pos.x, a2.bodyDest.y - recv.pos.y
+        local bd = math.sqrt(bx * bx + by * by)
+        local need = bd / math.max(0.05, tc - delay)
+        recv:moveTo(a2.bodyDest, delay, math.max(1, need / recv:speed()))
+        recv.pose = { state = a2.state, x = pt.x, y = pt.y, h = hh }
       end
     end
-    recv:moveTo(land, startDelay)
-  elseif slack < Shots.data.slackReach then
-    info.outcome = "winner"
-    recv:moveTo(land, startDelay)
-  else
-    info.outcome = "return"
-    info.timing = Shots.timingFromSlack(slack)
-    info.slack = slack
-    endH = Shots.contactHeight(Court.depthOf(land), info.timing)
-    -- Late-but-reachable: lunge (faster than normal) so they arrive exactly on time.
-    local avail = math.max(0.05, flight - startDelay)
-    recv:moveTo(land, startDelay, math.max(recv:speed(), V.dist(recv.pos, land) / avail))
   end
 
+  hitter.pose = nil
   hitter:moveTo(spot, self:_recoveryPause(hitter, d))
 
   self.flightInfo = info
-  self.path = { from = V.copy(d.from), h0 = d.contactH, to = endPos, h1 = endH, apex = apex, dur = dur, t = 0 }
+  self.path = { points = res.path, dt = res.dt, endTime = math.max(0.05, endTime), t = 0, landing = landing }
   self.phase = "flight"
   self.decision = nil
   self.shotCount = self.shotCount + 1
@@ -174,23 +204,32 @@ function Rally:commit(index, spot)
   return true
 end
 
-function Rally:pathPoint(path, t)
-  local p = V.lerp(path.from, path.to, t)
-  return { pos = p, h = path.h0 + (path.h1 - path.h0) * t + path.apex * 4 * t * (1 - t) }
+function Rally:_pathAt(t)
+  local P = self.path
+  local pts = P.points
+  local f = t / P.dt + 1
+  local i = math.max(1, math.min(#pts - 1, math.floor(f)))
+  local a, b = pts[i], pts[math.min(#pts, i + 1)]
+  local u = math.max(0, math.min(1, f - i))
+  return { pos = { x = a.x + (b.x - a.x) * u, y = a.y + (b.y - a.y) * u }, h = a.h + (b.h - a.h) * u }
+end
+
+function Rally:_endPoint(winner, reason, pos)
+  self.result = { winner = winner, reason = reason, pos = V.copy(pos), shots = self.shotCount }
+  self.phase = "point"
+  self.timer = 1.4
+  self:_emit({ type = "point", winner = winner, reason = reason, pos = self.result.pos })
 end
 
 function Rally:_resolveFlight()
   local f = self.flightInfo
   if f.outcome == "return" then
-    self:_beginDecision(f.receiverKey, "rally", f.timing, f.slack)
+    self:_beginDecision(f.receiverKey, "rally", f.next)
     return
   end
   local winner = (f.outcome == "winner") and f.hitterKey or f.receiverKey
-  local reason = (f.outcome == "winner") and "winner" or f.errorKind
-  self.result = { winner = winner, reason = reason, pos = V.copy(self.path.to), shots = self.shotCount }
-  self.phase = "point"
-  self.timer = 1.4
-  self:_emit({ type = "point", winner = winner, reason = reason, pos = self.result.pos })
+  local pos = f.outcome == "net" and self.shuttle.pos or self.path.landing
+  self:_endPoint(winner, f.outcome, pos)
 end
 
 function Rally:update(dt)
@@ -201,10 +240,10 @@ function Rally:update(dt)
     self.timer = self.timer - dt
     if self.timer <= 0 then self:_beginDecision(self.server, "serve") end
   elseif self.phase == "flight" then
-    local path = self.path
-    path.t = path.t + dt
-    self.shuttle = self:pathPoint(path, math.min(1, path.t / path.dur))
-    if path.t >= path.dur then self:_resolveFlight() end
+    local P = self.path
+    P.t = P.t + dt
+    self.shuttle = self:_pathAt(math.min(P.t, P.endTime))
+    if P.t >= P.endTime then self:_resolveFlight() end
   elseif self.phase == "point" then
     self.shuttle.h = math.max(0, self.shuttle.h - 3 * dt)   -- net errors drop to the floor
     self.timer = self.timer - dt

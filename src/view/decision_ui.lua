@@ -1,9 +1,8 @@
--- The frozen-at-contact UI: pick a target (with success % bubbles and a breakdown
--- tooltip), then pick a recovery spot inside the reachable circle.
+-- The frozen-at-contact UI: pick a target (success % bubbles, breakdown tooltip, landing
+-- spread, flight path), then pick a recovery spot inside the reachable area.
 local Layout = require("src.config.layout")
 local Draw = require("src.view.draw")
 local Assets = require("src.view.assets")
-local Shots = require("src.core.shots")
 local Court = require("src.core.court")
 
 local DecisionUI = {}
@@ -66,7 +65,7 @@ function DecisionUI:update(rally, mx, my, forced)
   self.mouse.x, self.mouse.y = mx, my
   if self.mode == "target" then
     self.hover = self:_hitTest(rally, mx, my)
-    if forced and forced.hover then self.hover = forced.hover end
+    if forced and forced.hover and rally.decision.options[forced.hover] then self.hover = forced.hover end
   end
 end
 
@@ -113,39 +112,49 @@ local function drawRing(cam, pos, r, filled)
   love.graphics.polygon("line", pts)
 end
 
-function DecisionUI:_drawTrajectory(rally, o)
-  local d = rally.decision
-  local path = {
-    from = d.from, h0 = d.contactH, to = o.pos,
-    h1 = Shots.contactHeight(Court.depthOf(o.pos), "ontime"), apex = o.eval.def.apex,
-  }
-  Draw.color(C.text, 0.7)
-  for i = 1, 19 do
-    local p = rally:pathPoint(path, i / 20)
-    local x, y = self.cam:project(p.pos.x, p.pos.y, p.h)
+function DecisionUI:_drawPath(o)
+  local path = o.eval.path
+  if not path then return end
+  Draw.color(C.text, 0.75)
+  for i = 2, #path - 1, 2 do
+    local p = path[i]
+    local x, y = self.cam:project(p.x, p.y, p.h)
     love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
   end
 end
 
-function DecisionUI:_drawRecoveryCircle(rally, o, strong)
+function DecisionUI:_drawLandings(o)
+  local l = o.eval.landings
+  if not l then return end
+  Draw.color(Draw.successColor(o.eval.success), 0.7)
+  for i = 1, #l, 6 do
+    local x, y = self.cam:project(l[i].x, l[i].y, 0)
+    love.graphics.rectangle("fill", math.floor(x), math.floor(y), 1, 1)
+  end
+end
+
+-- Reachable recovery area (a circle on the ground), clipped to own half.
+function DecisionUI:_drawRecoveryArea(rally, o, strong)
   local d = rally.decision
-  local side = rally.players[d.hitterKey].side
+  local hitter = rally.players[d.hitterKey]
   local cam = self.cam
-  -- clip to the hitter's own half (where they are allowed to recover)
+  local c = hitter.pos
+  local r = math.max(0.05, hitter:recoveryRadius(o.recoverTime, o.recoverPause))
+  local pts = cam:groundCircle(c.x, c.y, r, 48)
   love.graphics.stencil(function()
     local a = Court.HALF_WIDTH_SINGLES
-    local y1, y2 = side * 0.4, side * (Court.LENGTH + 0.3)
+    local y1, y2 = hitter.side * 0.4, hitter.side * (Court.LENGTH + 0.3)
     local p = {}
-    for _, c in ipairs({ { -a, y1 }, { a, y1 }, { a, y2 }, { -a, y2 } }) do
-      local x, y = cam:project(c[1], c[2], 0)
+    for _, q in ipairs({ { -a, y1 }, { a, y1 }, { a, y2 }, { -a, y2 } }) do
+      local x, y = cam:project(q[1], q[2], 0)
       p[#p + 1] = x; p[#p + 1] = y
     end
     love.graphics.polygon("fill", p)
   end, "replace", 1)
   love.graphics.setStencilTest("greater", 0)
   Draw.color(C.recovery, strong and 0.18 or 0.08)
-  local pts = cam:groundCircle(d.from.x, d.from.y, math.max(0.05, o.recoveryRadius), 48)
-  love.graphics.polygon("fill", pts)
+  local ok = pcall(love.graphics.polygon, "fill", pts)
+  if not ok then love.graphics.polygon("line", pts) end
   Draw.color(C.recovery, strong and 0.9 or 0.5)
   Draw.dashed(pts, true)
   love.graphics.setStencilTest()
@@ -163,18 +172,20 @@ function DecisionUI:drawGround(rally)
 
   local o = d.options[self.selected or self.hover or 0]
   if o and not o.disabled then
-    self:_drawRecoveryCircle(rally, o, self.mode == "recovery")
+    self:_drawRecoveryArea(rally, o, self.mode == "recovery")
+    self:_drawLandings(o)
   end
 end
 
--- Overlay layer: bubbles, preview, tooltip.
+local CONTACT_LABEL = { early = "EARLY", ontime = nil, stretched = "STRETCHED" }
+
+-- Overlay layer: bubbles, path, tooltip.
 function DecisionUI:drawOverlay(rally)
   local d = rally.decision
   local cam = self.cam
   local focus = d.options[self.selected or self.hover or 0]
-  if focus and not focus.disabled then self:_drawTrajectory(rally, focus) end
+  if focus and not focus.disabled then self:_drawPath(focus) end
 
-  -- bubbles with pins
   for i, o in ipairs(d.options) do
     local g = self:geom(o)
     local col = o.disabled and C.disabled or Draw.successColor(o.eval.success)
@@ -194,12 +205,11 @@ function DecisionUI:drawOverlay(rally)
     end
   end
 
-  -- recovery ghost
+  local hitter = rally.players[d.hitterKey]
   if self.mode == "recovery" then
     local o = d.options[self.selected]
     local spot = self:_recoverySpot(rally, o)
-    local hitter = rally.players[d.hitterKey]
-    local fx, fy = cam:project(d.from.x, d.from.y, 0)
+    local fx, fy = cam:project(hitter.pos.x, hitter.pos.y, 0)
     local sx, sy = cam:project(spot.x, spot.y, 0)
     Draw.color(C.recovery, 0.9)
     Draw.dashed({ fx, fy, sx, sy }, false)
@@ -210,18 +220,20 @@ function DecisionUI:drawOverlay(rally)
     love.graphics.line(sx - 3, sy + 3, sx + 3, sy - 3)
   end
 
-  -- timing badge over the hitter
-  local hitter = rally.players[d.hitterKey]
-  if d.timing ~= "ontime" then
-    local x, y = cam:project(hitter.pos.x, hitter.pos.y, Layout.actor.bodyHeight + 0.9)
-    local tm = Shots.data.timing[d.timing]
-    local col = d.timing == "late" and C.bad or C.good
-    Draw.text(string.format("%s %+d%%", tm.label:upper(), math.floor(tm.success * 100 + 0.5)),
-      x - 40, y, col, Assets.fonts.normal, "center", 80)
+  -- contact badge over the hitter
+  local ct = d.contact
+  local label = CONTACT_LABEL[ct.state]
+  if label then
+    if ct.state == "stretched" then label = string.format("%s %d%%", label, math.floor(ct.stretch * 100 + 0.5)) end
+    local x, y = cam:project(hitter.pos.x, hitter.pos.y, require("src.core.body").MAX_REACH + 0.4)
+    Draw.text(label, x - 50, y, ct.state == "early" and C.good or C.bad, Assets.fonts.normal, "center", 100)
   end
 
-  if self.mode == "target" and self.hover then self:_drawTooltip(rally, d.options[self.hover]) end
+  local hovered = self.mode == "target" and self.hover and d.options[self.hover]
+  if hovered then self:_drawTooltip(rally, hovered) end
 end
+
+local RECEIVER = { winner = "Can't reach", stretched = "Stretched", ontime = "On time", early = "Comfortable" }
 
 function DecisionUI:_drawTooltip(rally, o)
   local tt = Layout.tooltip
@@ -229,25 +241,34 @@ function DecisionUI:_drawTooltip(rally, o)
   local ev = o.eval
   local lines = {}
   local function add(l, r, col) lines[#lines + 1] = { l = l, r = r, col = col } end
+  local function pct(p) return string.format("%d%%", math.floor(p * 100 + 0.5)) end
 
   add(ev.name .. " > " .. o.label, nil, C.text)
-  for i, row in ipairs(ev.breakdown) do
-    local v = math.floor(row.value * 100 + (row.value >= 0 and 0.5 or -0.5))
-    local col = (i == 1 or v == 0) and C.textDim or (v > 0 and C.good or C.bad)
-    add(row.label, i == 1 and string.format("%d%%", v) or string.format("%+d%%", v), col)
+  for _, f in ipairs(ev.factors) do
+    local col = f.effect == "good" and C.good or (f.effect == "bad" and C.bad or C.textDim)
+    add(f.label, f.value, col)
   end
   add("-", nil)
-  add("Success", string.format("%d%%", math.floor(ev.success * 100 + 0.5)), Draw.successColor(ev.success))
-  add(string.format("Flight %.2fs", ev.flight), string.format("Recover %.1fm", o.recoveryRadius), C.textDim)
-  local st = o.receiverState
-  local stCol = (st == "winner" or st == "late") and C.good or (st == "early" and C.bad or C.ok)
-  add("Opponent", string.format("%s (%+.2fs)", Shots.REACH_LABEL[st], o.receiverSlack), stCol)
-  if o.disabled then add(o.disabled, nil, C.bad) end
+  if o.disabled then
+    add(o.disabled, nil, C.bad)
+  else
+    local risk = string.format("Net %s  Long %s  Wide %s", pct(ev.pNet), pct(ev.pLong), pct(ev.pWide))
+    if (ev.pShort or 0) > 0 then risk = risk .. "  Short " .. pct(ev.pShort) end
+    add(risk, nil, C.textDim)
+    add("Success", pct(ev.success), Draw.successColor(ev.success))
+    add(string.format("Flight %.2fs  %.1fm", ev.flight, ev.distance),
+      string.format("Over net %+.2fm", ev.overNet), C.textDim)
+    add(string.format("Recovery pause %.2fs", o.recoverPause),
+      string.format("then %.2fs", math.max(0, o.recoverTime - o.recoverPause)), C.textDim)
+    local a = o.receiver
+    local st = RECEIVER[a.state]
+    if a.state == "stretched" then st = string.format("%s %d%%", st, math.floor(a.stretch * 100 + 0.5)) end
+    local col = (a.state == "winner" or a.state == "stretched") and C.good or (a.state == "early" and C.bad or C.ok)
+    add("Opponent", st, col)
+  end
 
   local w = tt.width
   local h = tt.padding * 2 + #lines * tt.lineH
-  -- Fixed panel beside the far court, on the side away from the hovered target,
-  -- so it never covers the other targets or the opponent.
   local x = (o.pos.x < 0) and tt.rightX or tt.leftX
   local y = tt.y
 
