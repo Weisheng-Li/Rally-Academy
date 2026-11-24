@@ -11,7 +11,6 @@ local V = require("src.core.vec")
 local Court = require("src.core.court")
 local Shots = require("src.core.shots")
 local AI = require("src.core.ai")
-local Bal = require("src.data.balance")
 
 local Rally = {}
 Rally.__index = Rally
@@ -48,7 +47,7 @@ end
 function Rally:_emit(ev) self.events[#self.events + 1] = ev end
 
 function Rally:_recoveryPause(hitter, d)
-  return hitter:recoveryPause() + (d.contact.stretch or 0) * hitter:stretchPause()
+  return hitter:swingPause() + (d.contact.stretch or 0) * hitter:stretchPause()
 end
 
 ---------------------------------------------------------------------------- options
@@ -57,7 +56,7 @@ function Rally:_buildOptions(d)
   local hitter = self.players[d.hitterKey]
   local recv = self.players[other(d.hitterKey)]
   local ctx = { stats = hitter.stats, from = d.from, h0 = d.h0, contact = d.contact,
-                incoming = d.incoming, offBalance = hitter.offBalance, maxSpeed = hitter:maxLaunchSpeed() }
+                incoming = d.incoming, momentum = hitter:momentumSize(), maxSpeed = hitter:maxLaunchSpeed() }
   d.ctx = ctx
   local pause = self:_recoveryPause(hitter, d)
   local options = {}
@@ -125,7 +124,7 @@ function Rally:clampRecovery(option, spot)
   local dist = math.sqrt(dx * dx + dy * dy)
   local p = spot
   if dist > 0 then
-    local r = hitter:recoveryRadius(option.recoverTime, option.recoverPause)
+    local r = hitter:recoveryRadius(dx, dy, option.recoverTime, option.recoverPause)
     if dist > r then p = { x = c.x + dx / dist * r, y = c.y + dy / dist * r } end
   end
   return Court.clampToHalf(p, hitter.side)
@@ -154,13 +153,13 @@ function Rally:commit(index, spot)
   if res.outcome == "net" then
     endTime = (#res.path - 1) * res.dt
   elseif res.outcome ~= "in" then
-    recv:moveTo(recv:arrival(landing, res.time, Shots.data.earlySlack).bodyDest, recv:startDelay())
+    local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
+    recv:moveTo(a.bodyDest, a.delay)
   else
-    local wrongFooted = recv:movingAwayFrom(landing)
     local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
     if a.state == "winner" then
       info.outcome = "winner"
-      recv:moveTo(a.bodyDest, recv:startDelay())
+      recv:moveTo(a.bodyDest, a.delay)
       recv.pose = { state = "stretched" }
     else
       -- where (and when) the shuttle is at the receiver's contact height
@@ -174,7 +173,7 @@ function Rally:commit(index, spot)
       end
       if a2.state == "winner" then
         info.outcome = "winner"
-        recv:moveTo(a2.bodyDest, recv:startDelay())
+        recv:moveTo(a2.bodyDest, a2.delay)
         recv.pose = { state = "stretched" }
       else
         info.outcome = "return"
@@ -182,18 +181,15 @@ function Rally:commit(index, spot)
         if a2.state ~= "stretched" then
           a2.bodyDest = recv:hittingSpot(pt)       -- stand beside/behind the actual contact
         end
-        -- how much this shot unsettles the receiver (applied at their contact)
-        local causes = {}
-        if a2.stretch > 0 then causes[#causes + 1] = { "lunge", Bal.stretchGain * a2.stretch } end
-        if wrongFooted then causes[#causes + 1] = { "wrong-foot", Bal.wrongFootGain } end
-        if o.shotId == "smash" then causes[#causes + 1] = { "smash", Bal.smashGain } end
-        info.next = { contact = a2, from = pt, h0 = hh, incoming = o.shotId, unsettle = causes }
         endTime = tc
-        local delay = recv:startDelay()
+        local delay = a2.delay
         local bx, by = a2.bodyDest.x - recv.pos.x, a2.bodyDest.y - recv.pos.y
         local bd = math.sqrt(bx * bx + by * by)
-        local need = bd / math.max(0.05, tc - delay)
-        recv:moveTo(a2.bodyDest, delay, math.max(1, need / recv:speed()))
+        local speedMul = recv:speedMulTo(a2.bodyDest, math.max(0.05, tc - delay))
+        -- momentum carried into the shot from this run (applied at contact)
+        local mom = recv:momentumFromRun(bx, by, bd, recv:speed() * speedMul, a2.stretch, math.max(0, a2.slack))
+        info.next = { contact = a2, from = pt, h0 = hh, incoming = o.shotId, momentum = mom }
+        recv:moveTo(a2.bodyDest, delay, speedMul)
         recv.pose = { state = a2.state, x = pt.x, y = pt.y, h = hh }
       end
     end
@@ -211,10 +207,9 @@ function Rally:commit(index, spot)
   return true
 end
 
-function Rally:_pathAt(t)
-  local P = self.path
-  local pts = P.points
-  local f = t / P.dt + 1
+-- Shuttle state at time t along sampled points { {x,y,h}, ... } spaced dt apart.
+local function sampleAt(pts, dt, t)
+  local f = t / dt + 1
   local i = math.max(1, math.min(#pts - 1, math.floor(f)))
   local a, b = pts[i], pts[math.min(#pts, i + 1)]
   local u = math.max(0, math.min(1, f - i))
@@ -232,16 +227,7 @@ function Rally:_resolveFlight()
   local f = self.flightInfo
   if f.outcome == "return" then
     local recv = self.players[f.receiverKey]
-    local total, names = 0, {}
-    for _, c in ipairs(f.next.unsettle or {}) do
-      recv:unsettle(c[2])
-      total = total + c[2]
-      names[#names + 1] = c[1]
-    end
-    if total > 0 then
-      self:_emit({ type = "unsettle", key = f.receiverKey, who = recv.name, amount = total,
-                   causes = table.concat(names, ", "), level = recv.offBalance })
-    end
+    recv.momentum = f.next.momentum or { x = 0, y = 0 }
     self:_beginDecision(f.receiverKey, "rally", f.next)
     return
   end
@@ -260,7 +246,7 @@ function Rally:update(dt)
   elseif self.phase == "flight" then
     local P = self.path
     P.t = P.t + dt
-    self.shuttle = self:_pathAt(math.min(P.t, P.endTime))
+    self.shuttle = sampleAt(P.points, P.dt, math.min(P.t, P.endTime))
     if P.t >= P.endTime then self:_resolveFlight() end
   elseif self.phase == "point" then
     self.shuttle.h = math.max(0, self.shuttle.h - 3 * dt)   -- net errors drop to the floor

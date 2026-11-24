@@ -10,8 +10,8 @@ Title.__index = Title
 local C = Layout.colors
 local GROUPS = {
   { name = "Technique", stats = { "clear", "lift", "drop", "net", "drive", "smash" } },
-  { name = "Physical",  stats = { "power", "speed" } },
-  { name = "Movement",  stats = { "reaction", "reach", "balance" } },
+  { name = "Physical",  stats = { "power", "speed", "legs" } },
+  { name = "Movement",  stats = { "reach" } },
 }
 
 local LIST = { x = 24, y = 96, w = 210, h = 34, gap = 4 }

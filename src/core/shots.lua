@@ -4,7 +4,7 @@
 local Data = require("src.data.shots")
 local Traj = require("src.core.trajectory")
 local SM = require("src.core.shot_model")
-local Bal = require("src.data.balance")
+local Mom = require("src.data.momentum")
 
 local Shots = { data = Data }
 
@@ -44,7 +44,7 @@ end
 local function isSided(from) return math.abs(from.x) > 0.5 end
 
 -- ctx: { stats, from = ground pos, h0, contact = {state, stretch}, incoming = shotId|nil,
---        offBalance = 0..1, maxSpeed, court = landing area (optional) }
+--        momentum = m/s carried into the shot, maxSpeed, court = landing area (optional) }
 function Shots.evaluate(ctx, target, shotId)
   local def = Data.types[shotId]
   local stats = ctx.stats
@@ -66,10 +66,10 @@ function Shots.evaluate(ctx, target, shotId)
   if inc ~= 1 then
     factor("Returning a " .. Data.types[ctx.incoming].name:lower(), string.format("wobble x%.2f", inc), "bad")
   end
-  local ob = ctx.offBalance or 0
-  local obMul = 1 + Bal.wobbleAdd * ob
-  if ob >= 0.05 then
-    factor(string.format("Off balance %d%%", math.floor(ob * 100 + 0.5)), string.format("wobble x%.2f", obMul), "bad")
+  local mom = ctx.momentum or 0
+  local momMul = 1 + Mom.wobblePerMS * mom
+  if mom >= 0.1 then
+    factor(string.format("Momentum %.1f m/s", mom), string.format("wobble x%.2f", momMul), "bad")
   end
 
   local from = ctx.from
@@ -86,23 +86,23 @@ function Shots.evaluate(ctx, target, shotId)
     name = (cross and "Cross " or "Straight ") .. def.name:lower()
   end
 
-  -- Late (stretched) or badly off balance: only straight and defensive shots are easy.
-  local late = not def.serve and (ctx.contact.state == "stretched" or ob >= Bal.restrictAt)
+  -- Late (stretched) or carried by red momentum: only straight and defensive shots are easy.
+  local late = not def.serve and (ctx.contact.state == "stretched" or mom >= Mom.red)
   local lateMul = 1
   local lateReason
   if late and shotId == "smash" then
-    lateReason = "Too late / off balance to smash"
+    lateReason = "Too late or rushed to smash"
   elseif late and cross then
-    if lvl < Bal.crossMinTechnique then
+    if lvl < Mom.crossMinTechnique then
       lateReason = string.format("Too late for a cross shot (needs %s Lv%d)", Data.skillNames[def.skill],
-        Bal.crossMinTechnique)
+        Mom.crossMinTechnique)
     else
-      lateMul = Bal.lateCrossWobble
+      lateMul = Mom.lateCrossWobble
       factor("Late cross shot", string.format("wobble x%.2f", lateMul), "bad")
     end
   end
 
-  local mul = tech * tm * inc * obMul * lateMul
+  local mul = tech * tm * inc * momMul * lateMul
   local bw = Data.baseWobble
   local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul }
 

@@ -36,6 +36,10 @@ return {
   -- Player / racket / shuttle sizes live in src/core/body.lua (shared with the rules and
   -- checked by tests/), not here.
 
+  -- Momentum arrow on the floor (meters, drawn in court space): starts `start` m from the
+  -- feet, length = baseLength + lengthPerMS x momentum (m/s).
+  momentumArrow = { start = 0.25, baseLength = 0.3, lengthPerMS = 0.6, head = 0.35 },
+
   -- Trajectory preview color by flight time: fastTime or quicker = fast color,
   -- slowTime or longer = slow color, passing through mid halfway (red -> white -> blue).
   flightColors = {

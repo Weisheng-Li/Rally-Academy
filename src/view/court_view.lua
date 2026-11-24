@@ -5,7 +5,7 @@ local Layout = require("src.config.layout")
 local Draw = require("src.view.draw")
 local Figure = require("src.view.figure")
 local Body = require("src.core.body")
-local Bal = require("src.data.balance")
+local Mom = require("src.data.momentum")
 
 local CourtView = {}
 local C = Layout.colors
@@ -64,6 +64,29 @@ function CourtView.drawNet(cam)
   love.graphics.rectangle("fill", rx - 1, rt, 2, lg - rt)
 end
 
+function CourtView.drawMomentum(cam, a, alpha)
+  local m = a.momentum
+  local size = math.sqrt(m.x * m.x + m.y * m.y)
+  if size < Mom.yellow then return end
+  local A = Layout.momentumArrow
+  local col = size >= Mom.red and C.bad or C.ok
+  local ux, uy = m.x / size, m.y / size
+  local len = A.baseLength + A.lengthPerMS * size
+  local x0, y0 = a.pos.x + ux * A.start, a.pos.y + uy * A.start
+  local x1, y1 = x0 + ux * len, y0 + uy * len
+  local sx0, sy0 = cam:project(x0, y0, 0)
+  local sx1, sy1 = cam:project(x1, y1, 0)
+  -- arrow head: two short ground-plane wings back from the tip
+  local hx, hy = x1 - ux * A.head, y1 - uy * A.head
+  local lx, ly = cam:project(hx - uy * A.head * 0.7, hy + ux * A.head * 0.7, 0)
+  local rx, ry = cam:project(hx + uy * A.head * 0.7, hy - ux * A.head * 0.7, 0)
+  Draw.color(col, (alpha or 1) * 0.95)
+  love.graphics.setLineWidth(2)
+  love.graphics.line(sx0, sy0, sx1, sy1)
+  love.graphics.setLineWidth(1)
+  love.graphics.polygon("fill", sx1, sy1, lx, ly, rx, ry)
+end
+
 -- Fixed upright sprite sized from core/body.lua (via Figure). The racket handle is
 -- attached at the right shoulder and rotates in 2D to point at the shuttle's height.
 function CourtView.drawAthlete(cam, a, color, alpha)
@@ -78,16 +101,8 @@ function CourtView.drawAthlete(cam, a, color, alpha)
   Draw.color(C.shadow, 0.35 * alpha)
   love.graphics.ellipse("fill", x, y, w * 0.8, w * 0.3)
 
-  -- off-balance bar under the feet (empty = balanced, full red = completely off balance)
-  if a.offBalance then
-    local bw = math.max(16, w * 3)
-    local bx, by = math.floor(x - bw / 2), math.floor(y + 3)
-    Draw.color(C.panel, 0.9 * alpha)
-    love.graphics.rectangle("fill", bx - 1, by - 1, bw + 2, 4)
-    local ob = a.offBalance
-    Draw.color(ob >= Bal.restrictAt and C.bad or C.ok, alpha)
-    love.graphics.rectangle("fill", bx, by, math.floor(bw * ob + 0.5), 2)
-  end
+  -- momentum arrow on the floor: none when low, yellow in the middle band, red when high
+  if a.momentum then CourtView.drawMomentum(cam, a, alpha) end
 
   -- legs, torso (top = shoulder), head
   local legH = bh * 0.42

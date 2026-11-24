@@ -150,8 +150,15 @@ function DecisionUI:_drawRecoveryArea(rally, o, strong)
   local hitter = rally.players[d.hitterKey]
   local cam = self.cam
   local c = hitter.pos
-  local r = math.max(0.05, hitter:recoveryRadius(o.recoverTime, o.recoverPause))
-  local pts = cam:groundCircle(c.x, c.y, r, 48)
+  -- skewed circle: shorter against the hitter's momentum (braking comes first)
+  local pts = {}
+  for i = 0, 47 do
+    local ang = i / 48 * math.pi * 2
+    local dx, dy = math.cos(ang), math.sin(ang)
+    local r = math.max(0.05, hitter:recoveryRadius(dx, dy, o.recoverTime, o.recoverPause))
+    local x, y = cam:project(c.x + dx * r, c.y + dy * r, 0)
+    pts[#pts + 1] = x; pts[#pts + 1] = y
+  end
   love.graphics.stencil(function()
     local a = Court.HALF_WIDTH_SINGLES
     local y1, y2 = hitter.side * 0.4, hitter.side * (Court.LENGTH + 0.3)
@@ -240,10 +247,6 @@ function DecisionUI:drawOverlay(rally)
     Draw.text(label, x - 50, y, ct.state == "early" and C.good or C.bad, Assets.fonts.normal, "center", 100)
     y = y - 11
   end
-  if hitter.offBalance >= 0.05 then
-    Draw.text(string.format("OFF BALANCE %d%%", math.floor(hitter.offBalance * 100 + 0.5)), x - 60, y,
-      C.bad, Assets.fonts.normal, "center", 120)
-  end
 
   local hovered = self.mode == "target" and self.hover and d.options[self.hover]
   if hovered then self:_drawTooltip(rally, hovered) end
@@ -282,8 +285,8 @@ function DecisionUI:_drawTooltip(rally, o)
     local col = (a.state == "winner" or a.state == "stretched") and C.good or (a.state == "early" and C.bad or C.ok)
     add("Opponent reach", st, col)
     local recv = rally.players[rally.decision.hitterKey == "near" and "far" or "near"]
-    if recv.offBalance >= 0.05 then
-      add("Opponent off balance", pct(recv.offBalance), C.good)
+    if recv:momentumLevel() ~= "low" then
+      add("Opponent momentum", string.format("%.1f m/s", recv:momentumSize()), C.good)
     end
   end
 
