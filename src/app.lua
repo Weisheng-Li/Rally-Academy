@@ -47,6 +47,10 @@ function App:update(dt)
   if self.scene.update then self.scene:update(dt) end
 
   local ready = not self.scene.readyForShot or self.scene:readyForShot()
+  if self.dev.skidShot then
+    local rally = self.scene.match and self.scene.match.rally
+    ready = rally and rally.skid and rally.skid.t >= self.dev.skidShot or false
+  end
   if self.dev.shotAt and self.time >= self.dev.shotAt and ready and not self.shotTaken then
     self.shotTaken = true
     love.graphics.captureScreenshot(function(img)

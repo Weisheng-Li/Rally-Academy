@@ -36,6 +36,12 @@ return {
   -- Player / racket / shuttle sizes live in src/core/body.lua (shared with the rules and
   -- checked by tests/), not here.
 
+  -- Streak behind a skidding shuttle: shows only its last `skidTrail` seconds, fading out.
+  skidTrail = 0.25,
+
+  -- "WINNER!" / "OUT!" popup: bottom edge starts this high (m) above the landing spot and rises.
+  popup = { startHeight = 1.0, rise = 1.5 },
+
   -- Momentum arrow on the floor (meters, drawn in court space): starts `start` m from the
   -- feet, length = baseLength + lengthPerMS x momentum (m/s).
   momentumArrow = { start = 0.25, baseLength = 0.3, lengthPerMS = 0.6, head = 0.35 },
@@ -60,6 +66,7 @@ return {
     far        = { 1.00, 0.45, 0.35 },
     shadow     = { 0, 0, 0, 0.35 },
     shuttle    = { 1, 1, 1 },
+    skidMark   = { 1, 1, 1, 0.4 },    -- streak behind a skidding shuttle (fades out)
     good       = { 0.45, 0.90, 0.45 },
     ok         = { 1.00, 0.85, 0.35 },
     bad        = { 1.00, 0.40, 0.35 },

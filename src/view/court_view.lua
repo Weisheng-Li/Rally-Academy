@@ -132,6 +132,28 @@ function CourtView.drawShuttleShadow(cam, sh)
   love.graphics.ellipse("fill", x, y, r * 1.2, r * 0.5)
 end
 
+-- Short fading streak behind a skidding shuttle: only the last `trail` seconds of its floor
+-- path, fading toward the tail, so it disappears soon after the shuttle stops.
+function CourtView.drawSkidMark(cam, skid)
+  local trail = Layout.skidTrail
+  local pts, dt, t = skid.points, skid.dt, skid.t
+  local last = math.min(#pts, math.floor(t / dt) + 1)
+  local first = math.max(1, math.floor((t - trail) / dt) + 1)
+  local col = C.skidMark
+  love.graphics.setLineWidth(1)
+  for i = first, last - 1 do
+    local a, b = pts[i], pts[i + 1]
+    local age = t - (i - 1) * dt                 -- seconds since the shuttle was here
+    local fade = math.max(0, 1 - age / trail)
+    if fade > 0 then
+      local x0, y0 = cam:project(a.x, a.y, 0)
+      local x1, y1 = cam:project(b.x, b.y, 0)
+      love.graphics.setColor(col[1], col[2], col[3], (col[4] or 1) * fade)
+      love.graphics.line(x0, y0, x1, y1)
+    end
+  end
+end
+
 function CourtView.drawShuttle(cam, sh)
   local f = Figure.shuttle(cam, sh)
   Draw.color(C.shuttle)
@@ -142,6 +164,7 @@ end
 function CourtView.drawWorld(cam, match, extra)
   CourtView.drawFloor(cam)
   local rally = match.rally
+  if rally.skid then CourtView.drawSkidMark(cam, rally.skid) end
   if rally.shuttle then CourtView.drawShuttleShadow(cam, rally.shuttle) end
   if extra and extra.ground then extra.ground() end
 

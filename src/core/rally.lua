@@ -5,12 +5,13 @@
 --   "decide" frozen at contact; waiting for commit(optionIndex, recoverySpot)
 --            (AI hitters commit immediately, so only human hitters stay here)
 --   "flight" shuttle in the air along its physics path, athletes moving
---   "point"  shuttle is down, short pause
+--   "point"  shuttle is down (bouncing / skidding along the floor), short pause
 --   "done"   rally finished; read rally.result
 local V = require("src.core.vec")
 local Court = require("src.core.court")
 local Shots = require("src.core.shots")
 local AI = require("src.core.ai")
+local Skid = require("src.core.skid")
 
 local Rally = {}
 Rally.__index = Rally
@@ -233,6 +234,12 @@ function Rally:_resolveFlight()
   end
   local winner = (f.outcome == "winner") and f.hitterKey or f.receiverKey
   local pos = f.outcome == "net" and self.shuttle.pos or self.path.landing
+  if f.outcome ~= "net" then
+    -- it keeps going after it lands: bounce + skid (visual; the point is decided at `pos`)
+    local s = Skid.simulate(pos, Skid.landingVelocity(self.path.points, self.path.dt))
+    s.t = 0
+    self.skid = s
+  end
   self:_endPoint(winner, f.outcome, pos)
 end
 
@@ -249,7 +256,12 @@ function Rally:update(dt)
     self.shuttle = sampleAt(P.points, P.dt, math.min(P.t, P.endTime))
     if P.t >= P.endTime then self:_resolveFlight() end
   elseif self.phase == "point" then
-    self.shuttle.h = math.max(0, self.shuttle.h - 3 * dt)   -- net errors drop to the floor
+    if self.skid then
+      self.skid.t = self.skid.t + dt
+      self.shuttle = sampleAt(self.skid.points, self.skid.dt, self.skid.t)
+    else
+      self.shuttle.h = math.max(0, self.shuttle.h - 3 * dt)   -- net errors drop to the floor
+    end
     self.timer = self.timer - dt
     if self.timer <= 0 then self.phase = "done" end
   end

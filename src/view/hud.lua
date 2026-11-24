@@ -65,8 +65,11 @@ function Hud:draw(match, prompt, timeScale)
 
   -- popups
   for _, p in ipairs(self.popups) do
-    local x, y = self.cam:project(p.pos.x, p.pos.y, 0.5 + p.t * 1.5)
-    Draw.text(p.text, x - 50, y, p.col, Assets.fonts.big, "center", 100)
+    -- bottom edge sits above the landing spot so the skidding shuttle stays visible
+    local P = Layout.popup
+    local x, y = self.cam:project(p.pos.x, p.pos.y, P.startHeight + p.t * P.rise)
+    local font = Assets.fonts.big
+    Draw.text(p.text, x - 50, y - font:getHeight(), p.col, font, "center", 100)
   end
 
   if prompt then
