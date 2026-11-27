@@ -5,6 +5,7 @@ dist/
 
 # Local dev captures
 screenshots/
+!docs/screenshots/
 
 # OS / editor junk
 .DS_Store
