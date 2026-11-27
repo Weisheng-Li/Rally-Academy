@@ -252,8 +252,6 @@ function DecisionUI:drawOverlay(rally)
   if hovered then self:_drawTooltip(rally, hovered) end
 end
 
-local RECEIVER = { winner = "Can't reach", stretched = "Stretched", ontime = "On time", early = "Comfortable" }
-
 function DecisionUI:_drawTooltip(rally, o)
   local tt = Layout.tooltip
   local font = Assets.fonts.normal
@@ -279,15 +277,8 @@ function DecisionUI:_drawTooltip(rally, o)
       string.format("Over net %+.2fm", ev.overNet), C.textDim)
     add(string.format("Recovery pause %.2fs", o.recoverPause),
       string.format("then %.2fs", math.max(0, o.recoverTime - o.recoverPause)), C.textDim)
-    local a = o.receiver
-    local st = RECEIVER[a.state]
-    if a.state == "stretched" then st = string.format("%s %d%%", st, math.floor(a.stretch * 100 + 0.5)) end
-    local col = (a.state == "winner" or a.state == "stretched") and C.good or (a.state == "early" and C.bad or C.ok)
-    add("Opponent reach", st, col)
-    local recv = rally.players[rally.decision.hitterKey == "near" and "far" or "near"]
-    if recv:momentumLevel() ~= "low" then
-      add("Opponent momentum", string.format("%.1f m/s", recv:momentumSize()), C.good)
-    end
+
+    -- no opponent reach / momentum here: reading the opponent is the player's job
   end
 
   local w = tt.width

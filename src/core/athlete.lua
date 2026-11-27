@@ -8,6 +8,9 @@
 local V = require("src.core.vec")
 local Body = require("src.core.body")
 local M = require("src.data.momentum")
+local S = require("src.data.stats")
+local H = require("src.data.heart")
+local Curve = require("src.core.curve")
 
 local Athlete = {}
 Athlete.__index = Athlete
@@ -19,6 +22,8 @@ function Athlete.new(def, side)
   self.name = def.name
   self.title = def.title
   self.stats = def.stats
+  self.brain = def.brain           -- opponent AI only (data/athletes.lua)
+  self.level = def.level           -- 1-6 when made from a level preset
   self.side = side                 -- +1 near, -1 far
   self.pos = { x = 0, y = side * 3.6 }
   self.dest = nil
@@ -26,18 +31,62 @@ function Athlete.new(def, side)
   self.speedMul = 1                -- scales top speed so the sprite arrives on time
   self.pose = nil                  -- { state, x, y, h } contact the racket is reaching for (nil = ready)
   self.momentum = { x = 0, y = 0 } -- m/s carried on the floor
+  self.hr, self.hrFloor = H.start, H.start   -- heart rate (bpm) and its floor this rally
+  self.hrStart, self.hrLoad, self.hrCarry = H.start, 0, 0   -- rally start, exertion, carried over
   return self
 end
 
 ---------------------------------------------------------------------------- stat -> numbers
-local function legs(self) return self.stats.legs or 5 end
-function Athlete:speed() return 2.25 + 0.2 * self.stats.speed end              -- m/s top speed
-function Athlete:lungeReach() return 0.25 + 0.05 * self.stats.reach end         -- m extra reach by lunging
-function Athlete:maxLaunchSpeed() return 30 + 4 * self.stats.power end          -- m/s
+-- Curves in data/stats.lua (levels 1-10, linear in between). Missing stats count as Lv5.
+local function lv(self, k) return self.stats[k] or 5 end
+local function legs(self) return lv(self, "legs") end
+function Athlete:baseSpeed() return Curve.at(S.speed, lv(self, "speed")) end          -- m/s top speed, fresh
+-- tired legs (heart rate): slower top speed and push-off, so you arrive later and lunge more
+function Athlete:speed() return self:baseSpeed() * self:legsFatigueMul() end           -- m/s top speed now
+function Athlete:firstStep() return Curve.at(S.firstStep, lv(self, "speed")) * self:legsFatigueMul() end -- m/s push-off
+function Athlete:lungeReach() return Curve.at(S.reach, lv(self, "reach")) end         -- m extra reach by lunging
+function Athlete:maxLaunchSpeed() return Curve.at(S.power, lv(self, "power")) end     -- m/s
+function Athlete:reaction() return Curve.at(S.reaction, lv(self, "reaction")) end     -- s before moving
 function Athlete:momentumRetain() return M.retainBase - M.retainPerLegs * legs(self) end
 function Athlete:fadeRate() return M.fadeBase + M.fadePerLegs * legs(self) end    -- m/s per s
-function Athlete:swingPause() return M.swingPause end
-function Athlete:stretchPause() return M.stretchPause end   -- extra s at full stretch
+function Athlete:swingPause() return Curve.at(S.swingPause, lv(self, "recovery")) end
+function Athlete:stretchPause() return Curve.at(S.stretchPause, lv(self, "recovery")) end   -- extra s at full stretch
+
+---------------------------------------------------------------------------- heart rate
+-- See data/heart.lua. 0 below the onset, 1 at max heart rate.
+function Athlete:fatigue()
+  return math.max(0, math.min(1, ((self.hr or H.start) - H.onset) / (H.max - H.onset)))
+end
+function Athlete:legsFatigueMul() return 1 - H.slowAtMax * self:fatigue() end
+function Athlete:hrWobbleMul() return 1 + H.wobbleAtMax * self:fatigue() ^ 1.5 end
+local function staminaCost(self) return Curve.at(H.staminaCost, lv(self, "stamina")) end
+local function staminaRecover(self) return Curve.at(H.staminaRecover, lv(self, "stamina")) end
+
+-- New rally: you only partly recover. A hard last rally (lots of load) starts this one
+-- higher; that extra fades over a few quieter points.
+function Athlete:resetHeart()
+  self.hrCarry = math.min(H.carryMax, (self.hrCarry or 0) * H.carryDecay + H.carryPerLoad * (self.hrLoad or 0))
+  self.hrStart = math.min(H.max, H.start + self.hrCarry)
+  self.hr, self.hrFloor, self.hrLoad = self.hrStart, self.hrStart, 0
+end
+
+
+-- A lunge at contact: stretch 0..1.
+function Athlete:lungeHeart(stretch)
+  self.hr = math.min(H.max, self.hr + H.lunge * (stretch or 0) * staminaCost(self))
+end
+
+-- One frame at `speed` m/s: sprinting raises it fast, jogging a little, standing lowers it.
+function Athlete:heartStep(dt, speed)
+  local u = math.min(1, speed / self:baseSpeed())
+  local d = H.gain * u * u * staminaCost(self) - H.recover * (1 - u) * staminaRecover(self)
+  self.hr = math.max(self.hrFloor, math.min(H.max, self.hr + d * dt))
+  -- exertion: time spent above this rally's start raises your own floor
+  local start = self.hrStart or H.start
+  self.hrLoad = (self.hrLoad or 0) + math.max(0, self.hr - start) * dt
+  self.hrFloor = math.min(H.max, start + H.loadFloor * self.hrLoad)
+  self.hr = math.max(self.hr, self.hrFloor)
+end
 
 ---------------------------------------------------------------------------- kinematics
 -- Distance covered from rest-or-moving speed v (>= 0) in time t, accelerating to vmax.
@@ -56,16 +105,19 @@ local function timeFrom(v, d, a, vmax)
   return (vmax - v) / a + (d - sAcc) / vmax
 end
 
--- Starting velocity along unit direction (ux, uy) from the current momentum.
-function Athlete:startVelocity(ux, uy)
-  return math.min(self:speed(), self.momentum.x * ux + self.momentum.y * uy)
+-- Starting velocity along unit direction (ux, uy): the current momentum projected on it,
+-- plus the split-step push-off (Speed; zero for beginners). balanced = the move starts after
+-- the recovery pause, centre of gravity back over the feet: no momentum, any direction alike.
+function Athlete:startVelocity(ux, uy, balanced)
+  local carried = balanced and 0 or (self.momentum.x * ux + self.momentum.y * uy)
+  return math.min(self:speed(), carried + self:firstStep())
 end
 
 -- How far the athlete gets in direction (dx, dy) within time t (never negative).
-function Athlete:distanceIn(dx, dy, t)
+function Athlete:distanceIn(dx, dy, t, balanced)
   local l = math.sqrt(dx * dx + dy * dy)
   if t <= 0 then return 0 end
-  local v0 = (l > 1e-9) and self:startVelocity(dx / l, dy / l) or 0
+  local v0 = (l > 1e-9) and self:startVelocity(dx / l, dy / l, balanced) or 0
   local a, vmax = M.accel, self:speed()
   if v0 >= 0 then return distFrom(v0, t, a, vmax) end
   -- carried the wrong way: decelerate to zero (losing ground), then run
@@ -122,7 +174,8 @@ function Athlete:arrival(p, time, earlySlack)
   local spot = self:hittingSpot(p)
   local tx, ty = p.x - self.pos.x, p.y - self.pos.y
   local need = math.max(0, math.sqrt(tx * tx + ty * ty) - Athlete.REACH)
-  local delay = self.delay                       -- what is left of the swing pause
+  -- the opponent just hit: wait out what is left of the swing pause, and at least the reaction
+  local delay = math.max(self.delay, self:reaction())
   local avail = math.max(0, time - delay)
   local lunge = self:lungeReach()
   local travel = self:distanceIn(tx, ty, avail)
@@ -148,10 +201,11 @@ function Athlete:arrival(p, time, earlySlack)
   return { state = "winner", slack = slack, stretch = 1, bodyDest = partway(frac), delay = delay }
 end
 
--- How far this athlete can recover in direction (dx, dy) within `time` after a pause
--- (shorter against the current momentum, longer along it).
+-- How far this athlete can recover in direction (dx, dy) within `time` after the recovery
+-- pause. The pause is where you regain balance after the hit (longer after a deep lunge), so
+-- the move after it is the same in every direction: a circle.
 function Athlete:recoveryRadius(dx, dy, time, pause)
-  return self:distanceIn(dx, dy, time - pause)
+  return self:distanceIn(dx, dy, time - pause, true)
 end
 
 ---------------------------------------------------------------------------- movement
@@ -167,9 +221,12 @@ end
 -- with the momentum projected on the move direction, accelerate to top speed.
 -- speedMul (>= 1) scales acceleration and top speed together; used only when a lunge must
 -- carry the sprite to its hitting spot in time.
-function Athlete:moveTo(dest, delay, speedMul)
+-- balanced: start without momentum (a recovery move after the pause, see recoveryRadius).
+function Athlete:moveTo(dest, delay, speedMul, balanced)
   self.dest = V.copy(dest)
+  self.balanced = balanced or false
   self.delay = delay or 0
+  self.delayTotal = self.delay     -- for animation: how long this pause is in total
   self.speedMul = speedMul or 1
   self.vel = nil                   -- set from momentum when the move actually starts
 end
@@ -191,6 +248,15 @@ end
 function Athlete:isMoving() return self.dest ~= nil and self.delay <= 0 end
 
 function Athlete:update(dt)
+  local x, y = self.pos.x, self.pos.y
+  self:_move(dt)
+  if dt > 0 then
+    local moved = math.sqrt((self.pos.x - x) ^ 2 + (self.pos.y - y) ^ 2)
+    self:heartStep(dt, moved / dt)
+  end
+end
+
+function Athlete:_move(dt)
   -- regaining balance: momentum fades at the Legs rate
   local s = self:momentumSize()
   if s > 0 then
@@ -210,7 +276,7 @@ function Athlete:update(dt)
   if d < 1e-6 then self.dest = nil; return end
   local ux, uy = dx / d, dy / d
   local mul = self.speedMul or 1
-  if not self.vel then self.vel = self:startVelocity(ux, uy) end
+  if not self.vel then self.vel = self:startVelocity(ux, uy, self.balanced) end
   local vmax, a = self:speed() * mul, M.accel * mul
   -- integrate along the line (velocity may start negative: carried the wrong way)
   local v0 = self.vel

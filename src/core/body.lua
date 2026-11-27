@@ -20,6 +20,16 @@ local Body = {
   READY_ANGLE = 60,         -- degrees above horizontal when not hitting
 }
 
+Body.HIP_HEIGHT = Body.HEIGHT * 0.42                            -- 0.735 m, leg length when standing
+Body.TORSO_LENGTH = Body.SHOULDER_HEIGHT - Body.HIP_HEIGHT       -- 0.705 m, hip to shoulder
+
+-- Overreach: the legs are at full lunge, so the extra distance comes from tilting the upper
+-- body toward the shuttle. The shoulder moves forward by TORSO_LENGTH * sin(lean), so the
+-- lean is just enough to cover the overreach (m). Returns radians.
+function Body.leanFor(overreach)
+  return math.asin(math.max(0, math.min(1, overreach / Body.TORSO_LENGTH)))
+end
+
 Body.MAX_REACH = Body.SHOULDER_HEIGHT + Body.RACKET_LENGTH   -- 2.19 m
 Body.MIN_REACH = Body.SHOULDER_HEIGHT - Body.RACKET_LENGTH   -- 0.69 m (racket straight down)
 
@@ -32,6 +42,13 @@ end
 function Body.racketAngle(h)
   local s = (h - Body.SHOULDER_HEIGHT) / Body.RACKET_LENGTH
   return math.asin(math.max(-1, math.min(1, s)))
+end
+
+-- Racket angle (rad) that puts the head centre (the strings) at height h, swung low on the
+-- right side.
+local HEAD_R = Body.RACKET_LENGTH - Body.RACKET_HEAD / 2
+function Body.angleForHead(h)
+  return math.asin(math.max(-1, math.min(1, (h - Body.SHOULDER_HEIGHT) / HEAD_R)))
 end
 
 return Body

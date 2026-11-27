@@ -5,6 +5,8 @@ local Data = require("src.data.shots")
 local Traj = require("src.core.trajectory")
 local SM = require("src.core.shot_model")
 local Mom = require("src.data.momentum")
+local Body = require("src.core.body")
+local Curve = require("src.core.curve")
 
 local Shots = { data = Data }
 
@@ -12,23 +14,32 @@ local function lerp(a, b, t) return a + (b - a) * t end
 
 function Shots.typeFor(fromDepth, toDepth) return Data.matrix[fromDepth][toDepth] end
 
--- contact = { state = "early"|"ontime"|"stretched", stretch = 0..1 }
-function Shots.contactHeight(depth, contact)
+local TQ = Data.technique
+local function tq(curve, level) return Curve.at(TQ[curve], level or 5) end
+
+-- Highest contact this player can make: beginners have no overhead (mean of clear, drop, smash).
+function Shots.contactCeiling(stats)
+  if not stats then return math.huge end
+  local o = ((stats.clear or 5) + (stats.drop or 5) + (stats.smash or 5)) / 3
+  return tq("contactCeiling", o)
+end
+
+-- contact = { state = "early"|"ontime"|"stretched", stretch = 0..1 }; stats caps it (optional)
+function Shots.contactHeight(depth, contact, stats)
   local t = Data.contactHeight[depth]
-  if contact.state == "early" then return t.early end
-  if contact.state == "stretched" then return lerp(t.ontime, t.stretched, contact.stretch) end
-  return t.ontime
+  local h = t.ontime
+  if contact.state == "early" then h = t.early
+  elseif contact.state == "stretched" then h = lerp(t.ontime, t.stretched, contact.stretch) end
+  return math.min(h, Shots.contactCeiling(stats))
 end
 
-function Shots.techniqueMul(level)
-  local m = Data.techniqueMul
-  return m.step ^ (m.pivot - level)
-end
+function Shots.techniqueMul(level) return tq("wobble", level) end
 
-function Shots.timingMul(contact)
+-- level: technique of the shot's family (being late hurts less with a good technique)
+function Shots.timingMul(contact, level)
   local m = Data.timingMul
   if contact.state == "early" then return m.early end
-  if contact.state == "stretched" then return lerp(1, m.stretchedMax, contact.stretch) end
+  if contact.state == "stretched" then return lerp(1, tq("late", level), contact.stretch) end
   return m.ontime
 end
 
@@ -53,9 +64,10 @@ function Shots.evaluate(ctx, target, shotId)
   local function factor(label, value, effect) factors[#factors + 1] = { label = label, value = value, effect = effect } end
 
   local tech = Shots.techniqueMul(lvl)
+  local mid = Shots.techniqueMul(5)
   factor(string.format("%s technique Lv%d", Data.skillNames[def.skill], lvl), string.format("wobble x%.2f", tech),
-    tech < 1 and "good" or (tech > 1 and "bad" or nil))
-  local tm = Shots.timingMul(ctx.contact)
+    tech < mid and "good" or (tech > mid and "bad" or nil))
+  local tm = Shots.timingMul(ctx.contact, lvl)
   if ctx.contact.state == "early" then
     factor("Early contact (high)", string.format("wobble x%.2f", tm), "good")
   elseif ctx.contact.state == "stretched" then
@@ -85,6 +97,8 @@ function Shots.evaluate(ctx, target, shotId)
     cross = (from.x > 0) ~= (target.x > 0)
     name = (cross and "Cross " or "Straight ") .. def.name:lower()
   end
+  local crossMul = cross and tq("cross", lvl) or 1
+  if cross then factor("Cross-court", string.format("wobble x%.2f", crossMul), "bad") end
 
   -- Late (stretched) or carried by red momentum: only straight and defensive shots are easy.
   local late = not def.serve and (ctx.contact.state == "stretched" or mom >= Mom.red)
@@ -93,16 +107,23 @@ function Shots.evaluate(ctx, target, shotId)
   if late and shotId == "smash" then
     lateReason = "Too late or rushed to smash"
   elseif late and cross then
-    if lvl < Mom.crossMinTechnique then
-      lateReason = string.format("Too late for a cross shot (needs %s Lv%d)", Data.skillNames[def.skill],
-        Mom.crossMinTechnique)
-    else
-      lateMul = Mom.lateCrossWobble
-      factor("Late cross shot", string.format("wobble x%.2f", lateMul), "bad")
-    end
+    lateMul = tq("lateCross", lvl)          -- near-impossible without a good technique
+    factor("Late cross shot", string.format("wobble x%.2f", lateMul), "bad")
   end
 
-  local mul = tech * tm * inc * momMul * lateMul
+  local hrMul = ctx.hrMul or 1
+  if hrMul > 1.005 then
+    factor(string.format("Heart rate %d bpm", math.floor((ctx.hr or 0) + 0.5)), string.format("wobble x%.2f", hrMul), "bad")
+  end
+  local serveMul = def.serve and Data.serveEase or 1
+  if def.serve then factor("Serve (own toss)", string.format("wobble x%.2f", serveMul), "good") end
+  local mul = tech * tm * inc * momMul * crossMul * lateMul * serveMul * hrMul
+
+  -- net-clearance shots float higher over the tape with a weak technique
+  local spec = def.spec
+  if spec.kind == "net" then
+    spec = { kind = "net", clearance = spec.clearance * tq("tightness", lvl) }
+  end
   local bw = Data.baseWobble
   local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul }
 
@@ -134,7 +155,7 @@ function Shots.evaluate(ctx, target, shotId)
     factor(string.format("Power Lv%d", stats.power),
       v < maxV and string.format("%d of %d m/s (net)", v, maxV) or string.format("%d m/s", v), nil)
   else
-    sol = Traj.solve(h0, dist, netS, def.spec)
+    sol = Traj.solve(h0, dist, netS, spec)
     if not sol then return unavailable("No way to play this from here") end
     if not sol.clears then return unavailable("Can't clear the net from here") end
     if sol.speed > maxV + 1e-6 then
@@ -142,7 +163,7 @@ function Shots.evaluate(ctx, target, shotId)
     end
   end
 
-  local r = SM.evaluate(from, h0, target, def.spec, wobble, nil,
+  local r = SM.evaluate(from, h0, target, spec, wobble, nil,
     { solution = sol, court = ctx.court, keepLandings = true })
 
   local rec = Traj.fly(h0, sol.speed * math.cos(sol.angle), sol.speed * math.sin(sol.angle), netS, { record = true })
@@ -192,6 +213,30 @@ function Shots.execute(ctx, ev, rng)
   res.landing = { x = from.x + wx * r.land, y = from.y + wy * r.land }
   res.outcome = ev.classify(res.landing.x, res.landing.y)
   return res
+end
+
+---------------------------------------------------------------------------- low serve
+
+-- Where a server standing at `pos` (side +1 near / -1 far) tosses from and meets the shuttle.
+-- Start: at the chest, a little in front (toward the net is -side in y). Contact is on the
+-- racket head swung low on the right: `angle` puts the head centre at the contact height
+-- (Body.angleForHead). Returns { start = {x,y,h}, contact = {x,y,h}, angle }.
+function Shots.serveGeometry(pos, side)
+  local T = Data.serveToss
+  return {
+    start = { x = pos.x, y = pos.y - side * T.startFront, h = T.startH },
+    contact = { x = pos.x + side * T.contactRight, y = pos.y, h = Data.serveHeight },
+    angle = Body.angleForHead(Data.serveHeight),
+  }
+end
+
+-- Shuttle during the toss, u = 0 (leaves the chest) .. 1 (contact): a small arc under
+-- gravity that lands on the contact point exactly at u = 1, on the way down.
+function Shots.tossAt(g, u)
+  local T = Data.serveToss.time
+  local a, b, t = g.start, g.contact, u * T
+  return { pos = { x = lerp(a.x, b.x, u), y = lerp(a.y, b.y, u) },
+           h = lerp(a.h, b.h, u) + 0.5 * 9.81 * t * (T - t) }
 end
 
 -- Point on a recorded path where the falling shuttle comes down to height h.

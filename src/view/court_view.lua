@@ -5,7 +5,6 @@ local Layout = require("src.config.layout")
 local Draw = require("src.view.draw")
 local Figure = require("src.view.figure")
 local Body = require("src.core.body")
-local Mom = require("src.data.momentum")
 
 local CourtView = {}
 local C = Layout.colors
@@ -64,31 +63,36 @@ function CourtView.drawNet(cam)
   love.graphics.rectangle("fill", rx - 1, rt, 2, lg - rt)
 end
 
-function CourtView.drawMomentum(cam, a, alpha)
-  local m = a.momentum
-  local size = math.sqrt(m.x * m.x + m.y * m.y)
-  if size < Mom.yellow then return end
-  local A = Layout.momentumArrow
-  local col = size >= Mom.red and C.bad or C.ok
-  local ux, uy = m.x / size, m.y / size
-  local len = A.baseLength + A.lengthPerMS * size
-  local x0, y0 = a.pos.x + ux * A.start, a.pos.y + uy * A.start
-  local x1, y1 = x0 + ux * len, y0 + uy * len
-  local sx0, sy0 = cam:project(x0, y0, 0)
-  local sx1, sy1 = cam:project(x1, y1, 0)
-  -- arrow head: two short ground-plane wings back from the tip
-  local hx, hy = x1 - ux * A.head, y1 - uy * A.head
-  local lx, ly = cam:project(hx - uy * A.head * 0.7, hy + ux * A.head * 0.7, 0)
-  local rx, ry = cam:project(hx + uy * A.head * 0.7, hy - ux * A.head * 0.7, 0)
-  Draw.color(col, (alpha or 1) * 0.95)
-  love.graphics.setLineWidth(2)
-  love.graphics.line(sx0, sy0, sx1, sy1)
+-- Posed sprite (Figure.stance geometry): shadow, legs, torso, head, racket. `lift` (m)
+-- raises the body off the floor for hops; the shadow stays on the floor.
+function CourtView.drawStance(f, lift, color, alpha)
+  alpha = alpha or 1
+  Draw.color(C.shadow, 0.35 * alpha)
+  love.graphics.ellipse("fill", f.groundX, f.groundY, f.bodyW * 0.8, f.bodyW * 0.3)
+  love.graphics.push()
+  love.graphics.translate(0, -(lift or 0) * f.k)
+  Draw.color({ 0.15, 0.15, 0.2 }, alpha)
+  love.graphics.setLineWidth(f.legW)
+  love.graphics.setLineJoin("bevel")
+  for _, L in ipairs(f.legs) do love.graphics.line(L) end
   love.graphics.setLineWidth(1)
-  love.graphics.polygon("fill", sx1, sy1, lx, ly, rx, ry)
+  Draw.color(color, alpha)
+  love.graphics.polygon("fill", f.torso)
+  Draw.color({ 0.95, 0.80, 0.65 }, alpha)
+  love.graphics.circle("fill", f.head.x, f.head.y, f.head.r)
+  CourtView.drawRacket(f, alpha)
+  love.graphics.pop()
+end
+
+-- Athlete with footwork animation (an Animator from src/view/animator.lua).
+function CourtView.drawAnimated(cam, a, anim, color, alpha)
+  local st, lift = anim:stance(a, cam)
+  CourtView.drawStance(Figure.stance(cam, st, a.side), lift, color, alpha)
 end
 
 -- Fixed upright sprite sized from core/body.lua (via Figure). The racket handle is
 -- attached at the right shoulder and rotates in 2D to point at the shuttle's height.
+-- Still used for the recovery-spot ghost; players in a match use drawAnimated.
 function CourtView.drawAthlete(cam, a, color, alpha)
   local pose = a.pose
   local h = pose and (pose.h or (pose.state == "stretched" and Body.MIN_REACH)) or nil
@@ -101,9 +105,6 @@ function CourtView.drawAthlete(cam, a, color, alpha)
   Draw.color(C.shadow, 0.35 * alpha)
   love.graphics.ellipse("fill", x, y, w * 0.8, w * 0.3)
 
-  -- momentum arrow on the floor: none when low, yellow in the middle band, red when high
-  if a.momentum then CourtView.drawMomentum(cam, a, alpha) end
-
   -- legs, torso (top = shoulder), head
   local legH = bh * 0.42
   Draw.color({ 0.15, 0.15, 0.2 }, alpha)
@@ -114,8 +115,12 @@ function CourtView.drawAthlete(cam, a, color, alpha)
   local headR = bh * (1 - torsoTop) / 2
   love.graphics.circle("fill", x, y - bh + headR, headR)
 
-  -- racket: handle from the shoulder to the head, oval head ending at the tip
-  Draw.color({ 0.85, 0.85, 0.9 }, alpha)
+  CourtView.drawRacket(f, alpha)
+end
+
+-- Racket: handle from the shoulder to the head, oval head ending at the tip (Figure.racket).
+function CourtView.drawRacket(f, alpha)
+  Draw.color({ 0.85, 0.85, 0.9 }, alpha or 1)
   love.graphics.setLineWidth(1)
   love.graphics.line(f.shoulderX, f.shoulderY, f.headStartX, f.headStartY)
   love.graphics.push()
@@ -171,8 +176,12 @@ function CourtView.drawWorld(cam, match, extra)
   local items = {
     { y = 0, draw = function() CourtView.drawNet(cam) end },
   }
+  local anims = extra and extra.anims
   for key, a in pairs(match.players) do
-    items[#items + 1] = { y = a.pos.y, draw = function() CourtView.drawAthlete(cam, a, C[key]) end }
+    local anim = anims and anims[key]
+    items[#items + 1] = { y = a.pos.y, draw = function()
+      if anim then CourtView.drawAnimated(cam, a, anim, C[key]) else CourtView.drawAthlete(cam, a, C[key]) end
+    end }
   end
   if rally.shuttle then
     items[#items + 1] = { y = rally.shuttle.pos.y + 0.01, draw = function() CourtView.drawShuttle(cam, rally.shuttle) end }

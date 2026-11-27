@@ -26,6 +26,5 @@ return {
 
   -- shot effects
   wobblePerMS = 0.35,       -- wobble x(1 + wobblePerMS x momentum)
-  crossMinTechnique = 7,    -- late/red momentum cross shots need this technique level
-  lateCrossWobble = 1.5,    -- and even then they shake more
+  -- late/red momentum cross shots: extra wobble by technique (shots.lua technique.lateCross)
 }

@@ -23,11 +23,20 @@ local LATE = { state = "stretched", stretch = 0.6 }
 
 return {
   ["from rest: accelerate, then top speed"] = function(t)
-    local a = athlete(5)
+    local a = athlete(1)                       -- Speed Lv1: no split-step push-off
+    t:near(a:firstStep(), 0, 1e-12, "beginners start from a standstill")
     local v = a:speed()
     local tAcc = v / M.accel
     t:near(a:distanceIn(1, 0, tAcc), v * tAcc / 2, 1e-9, "distance while accelerating")
     t:near(a:distanceIn(1, 0, tAcc + 1), v * tAcc / 2 + v, 1e-9, "then top speed")
+  end,
+
+  ["split step: better players start each move already moving"] = function(t)
+    local a = athlete(8)
+    local v0, v = a:firstStep(), a:speed()
+    t:ok(v0 > 0.5, "push-off speed")
+    local tAcc = (v - v0) / M.accel
+    t:near(a:distanceIn(1, 0, tAcc), v0 * tAcc + 0.5 * M.accel * tAcc * tAcc, 1e-9, "starts at the push-off speed")
   end,
 
   ["time to cover is the inverse of distance covered"] = function(t)
@@ -79,13 +88,15 @@ return {
     t:ok(M.stretchPause >= 2 * M.swingPause, "a full stretch should cost far more than a normal swing")
   end,
 
-  ["recovery area is a skewed circle"] = function(t)
+  ["recovery area is a circle: balance is back after the pause, momentum doesn't skew it"] = function(t)
     local a = athlete(5)
     a.momentum = { x = 1.4, y = 0 }
     local along = a:recoveryRadius(1, 0, 1.5, 0.25)
     local side = a:recoveryRadius(0, 1, 1.5, 0.25)
     local against = a:recoveryRadius(-1, 0, 1.5, 0.25)
-    t:ok(along > side and side > against, "along > sideways > against")
+    t:near(along, side, 1e-12, "along = sideways")
+    t:near(against, side, 1e-12, "against = sideways")
+    t:ok(a:recoveryRadius(1, 0, 1.5, 0.8) < along, "a longer pause (deep lunge) still shrinks it")
   end,
 
   ["a ball behind you is reached later"] = function(t)
@@ -139,16 +150,56 @@ return {
     t:near(moving.wobbleMul / calm.wobbleMul, 1 + M.wobblePerMS * 1.0, 1e-9, "wobble multiplier")
   end,
 
-  ["red momentum or a stretch limits cross shots and smashes"] = function(t)
-    local low = athlete(M.crossMinTechnique - 1)
-    t:ok(not Shots.evaluate(ctx(low, ONTIME, M.red), CROSS, "clear").available, "red: cross blocked")
-    t:ok(Shots.evaluate(ctx(low, ONTIME, M.red - 0.01), CROSS, "clear").available, "below red: allowed")
-    t:ok(not Shots.evaluate(ctx(low, LATE, 0), CROSS, "clear").available, "stretched: cross blocked")
-    t:ok(Shots.evaluate(ctx(low, LATE, 0), STRAIGHT, "clear").available, "straight still fine")
-    local good = athlete(M.crossMinTechnique)
-    local late = Shots.evaluate(ctx(good, LATE, 0), CROSS, "clear")
-    local straight = Shots.evaluate(ctx(good, LATE, 0), STRAIGHT, "clear")
-    t:ok(late.available, "high technique can play it")
-    t:near(late.wobbleMul / straight.wobbleMul, M.lateCrossWobble, 1e-9, "late cross wobble")
+  ["late or red momentum: cross shots cost far more with a weak technique, no smash at all"] = function(t)
+    local Curve = require("src.core.curve")
+    local TQ = Shots.data.technique
+    for _, lv in ipairs({ 2, 5, 9 }) do
+      local a = athlete(lv)
+      local late = Shots.evaluate(ctx(a, LATE, 0), CROSS, "clear")
+      local straight = Shots.evaluate(ctx(a, LATE, 0), STRAIGHT, "clear")
+      t:near(late.wobbleMul / straight.wobbleMul, Curve.at(TQ.cross, lv) * Curve.at(TQ.lateCross, lv), 1e-9,
+        "late cross wobble Lv" .. lv)
+      local redCross = Shots.evaluate(ctx(a, ONTIME, M.red), CROSS, "clear")
+      local calmCross = Shots.evaluate(ctx(a, ONTIME, M.red - 0.01), CROSS, "clear")
+      t:ok(redCross.wobbleMul > calmCross.wobbleMul * Curve.at(TQ.lateCross, lv) * 0.99, "red counts as late Lv" .. lv)
+      t:ok(not Shots.evaluate(ctx(a, LATE, 0), STRAIGHT, "smash").available, "no smash when late Lv" .. lv)
+    end
+    local weak = Shots.evaluate(ctx(athlete(2), LATE, 0), CROSS, "clear")
+    local strong = Shots.evaluate(ctx(athlete(9), LATE, 0), CROSS, "clear")
+    t:ok(weak.success < 0.2, string.format("weak late cross clear nearly hopeless (%.0f%%)", weak.success * 100))
+    t:ok(strong.success > 0.6, string.format("strong late cross clear playable (%.0f%%)", strong.success * 100))
+  end,
+
+  ["being late hurts less with a good technique"] = function(t)
+    local lo = Shots.timingMul(LATE, 2)
+    local hi = Shots.timingMul(LATE, 9)
+    t:ok(lo > hi and hi > 1, "late penalty shrinks with technique")
+    t:near(Shots.timingMul(ONTIME, 2), 1, 1e-12, "on time: no penalty")
+  end,
+
+  ["beginners have no overhead: low contact ceiling, so no smash"] = function(t)
+    local beg = athlete(1)
+    local h = Shots.contactHeight("back", ONTIME, beg.stats)
+    t:ok(h < Shots.data.types.smash.minContact, "beginner contact below the smash minimum")
+    t:near(Shots.contactHeight("back", ONTIME, athlete(6).stats), Shots.data.contactHeight.back.ontime, 1e-12,
+      "good players hit at the normal height")
+  end,
+
+  ["weak technique floats net shots higher over the tape"] = function(t)
+    local from = { x = 0, y = 1.5 }
+    local function netH(lv)
+      local a = athlete(lv)
+      local c = { stats = a.stats, from = from, h0 = 0.6, contact = ONTIME, momentum = 0, maxSpeed = a:maxLaunchSpeed() }
+      return Shots.evaluate(c, { x = 1.85, y = -1.5 }, "net").overNet
+    end
+    t:ok(netH(1) > netH(5) + 0.1 and netH(5) > netH(10), "higher clearance at low technique")
+  end,
+
+  ["reaction: the receiver waits before moving"] = function(t)
+    local slow, fast = athlete(1), athlete(9)
+    slow.stats.reaction, fast.stats.reaction = 1, 9
+    local p = { x = 1.5, y = 3.6 }
+    t:near(slow:arrival(p, 1.0, 0.3).delay, slow:reaction(), 1e-12, "delay = reaction")
+    t:ok(slow:reaction() > fast:reaction() + 0.2, "slow reaction waits longer")
   end,
 }

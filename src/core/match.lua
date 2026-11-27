@@ -5,15 +5,15 @@ local Rally = require("src.core.rally")
 local Match = {}
 Match.__index = Match
 
--- o: { near = athleteDef, far = athleteDef, pointsToWin = 11, cap = 15,
+-- o: { near = athleteDef, far = athleteDef, pointsToWin = 5, cap = 7, server = "near",
 --      human = {near=true}, rng = fn, aiProfile = {} }
 function Match.new(o)
   local self = setmetatable({}, Match)
-  self.players = { near = Athlete.new(o.near, 1), far = Athlete.new(o.far, -1) }
+  self.players = { near = Athlete.new(o.near, 1), far = Athlete.new(o.far, -1) }   -- fresh: no carried fatigue
   self.score = { near = 0, far = 0 }
-  self.server = "near"
-  self.pointsToWin = o.pointsToWin or 11
-  self.cap = o.cap or 15
+  self.server = o.server or "near"
+  self.pointsToWin = o.pointsToWin or 5   -- first to 5, win by 2, capped at 7 (short games while testing)
+  self.cap = o.cap or 7
   self.human = o.human or { near = true }
   self.rng = o.rng or math.random
   self.aiProfile = o.aiProfile

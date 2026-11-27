@@ -4,6 +4,8 @@
 --   "pre"    short pause before the serve
 --   "decide" frozen at contact; waiting for commit(optionIndex, recoverySpot)
 --            (AI hitters commit immediately, so only human hitters stay here)
+--   "toss"   serves only: the shuttle is tossed from the chest onto the racket
+--            (Shots.tossAt); nobody moves until contact
 --   "flight" shuttle in the air along its physics path, athletes moving
 --   "point"  shuttle is down (bouncing / skidding along the floor), short pause
 --   "done"   rally finished; read rally.result
@@ -40,8 +42,12 @@ function Rally.new(o)
   local sx = (o.serverScore % 2 == 0) and rightX or -rightX
   s:placeAt({ x = sx, y = s.side * 2.3 })
   r:placeAt({ x = -sx, y = r.side * 3.0 })                -- diagonal service court
+  s:resetHeart(); r:resetHeart()                          -- partly recovered since last rally
   self.serveX = sx
-  self.shuttle = { pos = V.copy(s.pos), h = Shots.data.serveHeight }
+  self.serveGeo = Shots.serveGeometry(s.pos, s.side)
+  local c = self.serveGeo.start          -- held at the chest
+  self.shuttle = { pos = { x = c.x, y = c.y }, h = c.h }
+  s.pose = { state = "serve", toss = 0 }    -- racket back, ready to toss
   return self
 end
 
@@ -57,7 +63,18 @@ function Rally:_buildOptions(d)
   local hitter = self.players[d.hitterKey]
   local recv = self.players[other(d.hitterKey)]
   local ctx = { stats = hitter.stats, from = d.from, h0 = d.h0, contact = d.contact,
-                incoming = d.incoming, momentum = hitter:momentumSize(), maxSpeed = hitter:maxLaunchSpeed() }
+                incoming = d.incoming, momentum = d.momentum or hitter:momentumSize(),
+                maxSpeed = hitter:maxLaunchSpeed(), hr = hitter.hr, hrMul = hitter:hrWobbleMul() }
+  -- AI opponents aim a little inside the standard targets (brain.aimMargin m toward the middle)
+  local margin = (not self.human[d.hitterKey] and hitter.brain and hitter.brain.aimMargin) or 0
+  local mid = Court.basePos(recv.side)
+  local function aim(pos)
+    if margin <= 0 then return pos end
+    local dx, dy = mid.x - pos.x, mid.y - pos.y
+    local len = math.sqrt(dx * dx + dy * dy)
+    local k = math.min(1, margin / math.max(1e-6, len))
+    return { x = pos.x + dx * k, y = pos.y + dy * k }
+  end
   d.ctx = ctx
   local pause = self:_recoveryPause(hitter, d)
   local options = {}
@@ -84,7 +101,7 @@ function Rally:_buildOptions(d)
     add("long_serve", "Long", { x = rx * 1.0, y = rs * 6.0 }, "long_serve", court)
   else
     for _, z in ipairs(Court.ZONES) do
-      add(z.id, z.label, Court.zonePos(z, recv.side), Shots.typeFor(d.depth, z.depth), nil)
+      add(z.id, z.label, aim(Court.zonePos(z, recv.side)), Shots.typeFor(d.depth, z.depth), nil)
     end
   end
   return options
@@ -97,15 +114,24 @@ function Rally:_beginDecision(key, kind, nxt)
   d.contact = nxt.contact or ONTIME
   d.from = nxt.from and V.copy(nxt.from) or V.copy(hitter.pos)
   d.h0 = nxt.h0 or Shots.data.serveHeight
+  if kind == "serve" then            -- hit low on the racket head, in front of the server
+    local c = self.serveGeo.contact
+    d.from, d.h0 = { x = c.x, y = c.y }, c.h
+  end
   d.depth = Court.depthOf(d.from)
   d.incoming = nxt.incoming
   d.options = self:_buildOptions(d)
   self.decision = d
   self.phase = "decide"
-  self.shuttle = { pos = V.copy(d.from), h = d.h0 }
+  if kind == "serve" then
+    local c = self.serveGeo.start     -- still held at the chest
+    self.shuttle = { pos = { x = c.x, y = c.y }, h = c.h }
+  else
+    self.shuttle = { pos = V.copy(d.from), h = d.h0 }
+  end
 
   if not self.human[key] then
-    local i, spot = AI.choose(self, d, self.rng, self.aiProfile)
+    local i, spot = AI.choose(self, d, self.rng, hitter.brain or self.aiProfile)
     if not self:commit(i, spot) then
       -- nothing playable: the shuttle drops
       self:_endPoint(other(key), "winner", d.from)
@@ -133,6 +159,35 @@ end
 
 ---------------------------------------------------------------------------- the hit
 
+-- How `recv` gets to a shuttle flying along `path` (points spaced dt) that would land at
+-- `landing` after `time` s. Pure: moves nobody (commit applies it; the AI uses it to predict).
+-- Returns { outcome = "winner"|"return", a = first arrival, a2, pt, tc, hh, speedMul, momentum }
+function Rally.receive(recv, path, dt, landing, time)
+  local E = Shots.data.earlySlack
+  local a = recv:arrival(landing, time, E)
+  if a.state == "winner" then return { outcome = "winner", a = a } end
+  -- where (and when) the shuttle is at the receiver's contact height
+  local depth = Court.depthOf(landing)
+  local pt, tc, hh = Shots.contactOnPath(path, dt, Shots.contactHeight(depth, a, recv.stats))
+  local a2 = recv:arrival(pt, tc, E)
+  if a2.state == "winner" then
+    -- too slow for a high contact: let it drop to the lowest reachable contact
+    pt, tc, hh = Shots.contactOnPath(path, dt, Shots.contactHeight(depth, { state = "stretched", stretch = 1 }, recv.stats))
+    a2 = recv:arrival(pt, tc, E)
+  end
+  if a2.state == "winner" then return { outcome = "winner", a = a2 } end
+  hh = Shots.contactHeight(Court.depthOf(pt), a2, recv.stats)
+  if a2.state ~= "stretched" then
+    a2.bodyDest = recv:hittingSpot(pt)       -- stand beside/behind the actual contact
+  end
+  local bx, by = a2.bodyDest.x - recv.pos.x, a2.bodyDest.y - recv.pos.y
+  local bd = math.sqrt(bx * bx + by * by)
+  local speedMul = recv:speedMulTo(a2.bodyDest, math.max(0.05, tc - a2.delay))
+  -- momentum carried into the shot from this run (applied at contact)
+  local mom = recv:momentumFromRun(bx, by, bd, recv:speed() * speedMul, a2.stretch, math.max(0, a2.slack))
+  return { outcome = "return", a = a2, a2 = a2, pt = pt, tc = tc, hh = hh, speedMul = speedMul, momentum = mom }
+end
+
 function Rally:commit(index, spot)
   local d = self.decision
   local o = d and index and d.options[index]
@@ -157,53 +212,47 @@ function Rally:commit(index, spot)
     local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
     recv:moveTo(a.bodyDest, a.delay)
   else
-    local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
-    if a.state == "winner" then
+    local r = Rally.receive(recv, res.path, res.dt, landing, res.time)
+    local a2 = r.a
+    if r.outcome == "winner" then
       info.outcome = "winner"
-      recv:moveTo(a.bodyDest, a.delay)
+      recv:moveTo(a2.bodyDest, a2.delay)
       recv.pose = { state = "stretched" }
     else
-      -- where (and when) the shuttle is at the receiver's contact height
-      local depth = Court.depthOf(landing)
-      local pt, tc, hh = Shots.contactOnPath(res.path, res.dt, Shots.contactHeight(depth, a))
-      local a2 = recv:arrival(pt, tc, Shots.data.earlySlack)
-      if a2.state == "winner" then
-        -- too slow for a high contact: let it drop to the lowest reachable contact
-        pt, tc, hh = Shots.contactOnPath(res.path, res.dt, Shots.contactHeight(depth, { state = "stretched", stretch = 1 }))
-        a2 = recv:arrival(pt, tc, Shots.data.earlySlack)
-      end
-      if a2.state == "winner" then
-        info.outcome = "winner"
-        recv:moveTo(a2.bodyDest, a2.delay)
-        recv.pose = { state = "stretched" }
-      else
-        info.outcome = "return"
-        hh = Shots.contactHeight(Court.depthOf(pt), a2)
-        if a2.state ~= "stretched" then
-          a2.bodyDest = recv:hittingSpot(pt)       -- stand beside/behind the actual contact
-        end
-        endTime = tc
-        local delay = a2.delay
-        local bx, by = a2.bodyDest.x - recv.pos.x, a2.bodyDest.y - recv.pos.y
-        local bd = math.sqrt(bx * bx + by * by)
-        local speedMul = recv:speedMulTo(a2.bodyDest, math.max(0.05, tc - delay))
-        -- momentum carried into the shot from this run (applied at contact)
-        local mom = recv:momentumFromRun(bx, by, bd, recv:speed() * speedMul, a2.stretch, math.max(0, a2.slack))
-        info.next = { contact = a2, from = pt, h0 = hh, incoming = o.shotId, momentum = mom }
-        recv:moveTo(a2.bodyDest, delay, speedMul)
-        recv.pose = { state = a2.state, x = pt.x, y = pt.y, h = hh }
-      end
+      info.outcome = "return"
+      endTime = r.tc
+      info.next = { contact = a2, from = r.pt, h0 = r.hh, incoming = o.shotId, momentum = r.momentum }
+      recv:moveTo(a2.bodyDest, a2.delay, r.speedMul)
+      recv.pose = { state = a2.state, x = r.pt.x, y = r.pt.y, h = r.hh, stretch = a2.stretch }
     end
+    -- habits: which target this player picks from each depth (anticipation 3 reads them)
+    hitter.habits = hitter.habits or {}
+    local hk = d.depth
+    hitter.habits[hk] = hitter.habits[hk] or {}
+    hitter.habits[hk][o.id] = (hitter.habits[hk][o.id] or 0) + 1
   end
 
-  hitter.pose = nil
-  hitter:moveTo(spot, self:_recoveryPause(hitter, d))
+  hitter:moveTo(spot, self:_recoveryPause(hitter, d), nil, true)   -- balanced again after the pause
 
   self.flightInfo = info
   self.path = { points = res.path, dt = res.dt, endTime = math.max(0.05, endTime), t = 0, landing = landing }
-  self.phase = "flight"
+  if d.kind == "serve" then
+    -- toss first: from the chest onto the racket, then the flight starts
+    -- nobody starts moving until the contact: both moves wait out the toss as well
+    self.phase = "toss"
+    self.tossT = 0
+    hitter.pose = { state = "serve", toss = 0 }
+    local T = Shots.data.serveToss.time
+    for _, p in pairs(self.players) do
+      if p.dest then p.delay, p.delayTotal = p.delay + T, (p.delayTotal or 0) + T end
+    end
+  else
+    hitter.pose = nil
+    self.phase = "flight"
+  end
   self.decision = nil
   self.shotCount = self.shotCount + 1
+
   self:_emit({ type = "hit", key = d.hitterKey, who = hitter.name, shot = ev.name, success = ev.success })
   return true
 end
@@ -229,6 +278,7 @@ function Rally:_resolveFlight()
   if f.outcome == "return" then
     local recv = self.players[f.receiverKey]
     recv.momentum = f.next.momentum or { x = 0, y = 0 }
+    recv:lungeHeart(f.next.contact.stretch)               -- a deep lunge costs heart rate
     self:_beginDecision(f.receiverKey, "rally", f.next)
     return
   end
@@ -246,6 +296,25 @@ end
 function Rally:update(dt)
   if self.phase == "decide" or self.phase == "done" then return end
   for _, p in pairs(self.players) do p:update(dt) end
+
+  if self.phase == "toss" then
+    -- the shuttle arcs from the chest onto the racket (moves are delayed past the contact)
+    local T = Shots.data.serveToss.time
+    self.tossT = self.tossT + dt
+    local u = math.min(1, self.tossT / T)
+    local server = self.players[self.server]
+    self.shuttle = Shots.tossAt(self.serveGeo, u)
+    if u < 1 then
+      server.pose.toss = u
+      return
+    end
+    server.pose = nil                  -- contact: the flight starts with the leftover time
+    self.phase = "flight"
+    local P = self.path
+    P.t = self.tossT - T
+    self.shuttle = sampleAt(P.points, P.dt, math.min(P.t, P.endTime))
+    return
+  end
 
   if self.phase == "pre" then
     self.timer = self.timer - dt

@@ -16,8 +16,10 @@ function App.new(args)
   self.time = 0
   Assets.load()
   self:resize(love.graphics.getDimensions())
-  if self.dev.profile then
-    self:switch("match", { profile = self.dev.profile, seed = self.dev.seed })
+  if self.dev.demo then
+    self:switch("demo_" .. self.dev.demo)
+  elseif self.dev.profile then
+    self:switch("match", { you = self.dev.profile, opp = self.dev.opp, seed = self.dev.seed })
   else
     self:switch("title")
   end
@@ -47,6 +49,7 @@ function App:update(dt)
   if self.scene.update then self.scene:update(dt) end
 
   local ready = not self.scene.readyForShot or self.scene:readyForShot()
+  if self.dev.anytime then ready = true end
   if self.dev.skidShot then
     local rally = self.scene.match and self.scene.match.rally
     ready = rally and rally.skid and rally.skid.t >= self.dev.skidShot or false

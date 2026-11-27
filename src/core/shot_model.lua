@@ -166,8 +166,8 @@ function SM.evaluate(contact, h0, target, spec, wobble, cfg, opts)
   local function classify(px, py)
     local ay = py * recvSide
     if ay > court.yMax then return "long" end
+    if ay < court.yMin then return "short" end     -- before wide: a short serve that drifts across is called short
     if px < court.xMin or px > court.xMax then return "wide" end
-    if ay < court.yMin then return "short" end
     return "in"
   end
 

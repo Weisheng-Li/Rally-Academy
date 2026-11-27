@@ -8,6 +8,7 @@ local DecisionUI = require("src.view.decision_ui")
 local Hud = require("src.view.hud")
 local Draw = require("src.view.draw")
 local Assets = require("src.view.assets")
+local Animator = require("src.view.animator")
 
 local MatchScene = {}
 MatchScene.__index = MatchScene
@@ -15,19 +16,20 @@ MatchScene.__index = MatchScene
 function MatchScene.new(app, params)
   local self = setmetatable({}, MatchScene)
   self.app = app
-  self.profile = params.profile or "rookie"
+  self.you, self.opp = params.you or 3, params.opp or 3   -- levels (src/data/athletes.lua)
   local rng = love.math.newRandomGenerator(params.seed or os.time())
   local human = { near = true }
   if app.dev.autoDecisions then human = {} end   -- AI plays for you until N decisions have passed
   self.match = Match.new({
-    near = Athletes[self.profile], far = Athletes.kai,
-    human = human, rng = function() return rng:random() end,
+    near = Athletes.level(self.you, "You"), far = Athletes.level(self.opp),
+    human = human, rng = function() return rng:random() end, server = app.dev.server,
   })
   self.decisionsSeen = 0
   self.cam = Camera.new(Layout.camera)
   self.ui = DecisionUI.new(self.cam)
   self.hud = Hud.new(self.cam)
   self.timeScale = Layout.timeScale
+  self.anims = { near = Animator.new(1), far = Animator.new(-1) }   -- footwork animation
   return self
 end
 
@@ -35,6 +37,7 @@ function MatchScene:update(dt)
   local m = self.match
   local dev = self.app.dev
   if not m.over then m:update(dt * self.timeScale) end
+  for key, anim in pairs(self.anims) do anim:update(m.players[key], dt * self.timeScale, self.cam) end
   local events = m:drainEvents()
   if dev.autoDecisions then
     -- AI plays your first N shots, then control comes back to you
@@ -79,6 +82,7 @@ function MatchScene:draw()
   local m = self.match
   local deciding = m.rally:isHumanDecision()
   CourtView.drawWorld(self.cam, m, {
+    anims = self.anims,
     ground = deciding and function() self.ui:drawGround(m.rally) end or nil,
   })
   if deciding then self.ui:drawOverlay(m.rally) end
@@ -87,7 +91,7 @@ function MatchScene:draw()
   if m.over then
     local won = m.winner == "near"
     Draw.panel(170, 130, 300, 90)
-    Draw.text(won and "YOU WIN" or "KAI WINS", 170, 145, won and Layout.colors.good or Layout.colors.bad,
+    Draw.text(won and "YOU WIN" or (m.players.far.name:upper() .. " WINS"), 170, 145, won and Layout.colors.good or Layout.colors.bad,
       Assets.fonts.big, "center", 300)
     Draw.text(string.format("%d - %d", m.score.near, m.score.far), 170, 172, Layout.colors.text,
       Assets.fonts.normal, "center", 300)
@@ -101,11 +105,13 @@ function MatchScene:mousepressed(x, y, button)
 end
 
 function MatchScene:keypressed(key)
-  if self.match.over and (key == "return" or key == "space") then self.app:switch("title"); return end
+  if self.match.over and (key == "return" or key == "space") then
+    self.app:switch("title", { you = self.you, opp = self.opp }); return
+  end
   if key == "[" then self.timeScale = math.max(0.25, self.timeScale - 0.25) end
   if key == "]" then self.timeScale = math.min(3, self.timeScale + 0.25) end
   if key == "escape" and not (self.match.rally:isHumanDecision() and self.ui.mode == "recovery") then
-    self.app:switch("title"); return
+    self.app:switch("title", { you = self.you, opp = self.opp }); return
   end
   if self.match.rally:isHumanDecision() then self.ui:keypressed(self.match.rally, key) end
 end

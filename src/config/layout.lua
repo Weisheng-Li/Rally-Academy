@@ -18,9 +18,11 @@ return {
 
   hud = {
     scoreX = 8, scoreY = 8,
-    logX = 486, logY = 8, logWidth = 148, logLines = 6,
     promptY = 344,
     hintX = 8, hintY = 346,
+    -- your heart rate (only yours: the opponent's is for you to read from how they move)
+    hr = { x = 8, y = 58, textY = 11,     -- bpm with a pulsing dot, what it does to you below
+           showOpponent = true, oppY = 86 },  -- TEMPORARY debug: the opponent's too (normally hidden)
   },
 
   targets = {
@@ -28,6 +30,14 @@ return {
     bubbleHeight = 2.4,   -- meters above the ground (before heightScale)
     bubbleW = 30, bubbleH = 13,
     bubbleOffsetX = 14,   -- push bubbles outward so the pins look like the sketch
+  },
+
+  -- Title / level picker: your level on the left, the opponent's on the right, stats between.
+  menu = {
+    titleY = 14, subtitleY = 50,
+    youX = 16, oppX = 444, listY = 84, rowW = 180, rowH = 32, rowGap = 4,
+    statsX = 206, statsY = 84, statsW = 228, statsH = 212,
+    hintY = 340,
   },
 
   -- Shot breakdown panel. Shown at leftX when hovering a right-side target, rightX for left-side.
@@ -41,10 +51,6 @@ return {
 
   -- "WINNER!" / "OUT!" popup: bottom edge starts this high (m) above the landing spot and rises.
   popup = { startHeight = 1.0, rise = 1.5 },
-
-  -- Momentum arrow on the floor (meters, drawn in court space): starts `start` m from the
-  -- feet, length = baseLength + lengthPerMS x momentum (m/s).
-  momentumArrow = { start = 0.25, baseLength = 0.3, lengthPerMS = 0.6, head = 0.35 },
 
   -- Trajectory preview color by flight time: fastTime or quicker = fast color,
   -- slowTime or longer = slow color, passing through mid halfway (red -> white -> blue).

@@ -1,55 +1,51 @@
--- Athlete presets. Stats are levels 1-10:
---   1-2 beginner, 4-6 intermediate (club player), 8-10 advanced.
---   Technique: clear, lift, drop, net, drive, smash   -> hand shake (wobble) per shot family
---   Physical:  power -> max launch speed;  speed -> running speed;
---              legs  -> how much momentum you keep from a run, and how fast it fades
---   Movement:  reach -> lunge distance
-local A = {
-  rookie = {
-    name = "You", title = "Rookie", tag = "Beginner at everything",
-    stats = { clear = 2, lift = 2, drop = 1, net = 1, drive = 2, smash = 1,
-              power = 2, speed = 2, legs = 2,
-              reach = 2 },
-  },
-  trained = {
-    name = "You", title = "Trained", tag = "Even intermediate",
-    stats = { clear = 5, lift = 5, drop = 5, net = 5, drive = 5, smash = 5,
-              power = 5, speed = 5, legs = 5,
-              reach = 5 },
-  },
-  touch = {
-    name = "You", title = "Touch Artist", tag = "Deadly drops and net play, no smash",
-    stats = { clear = 3, lift = 4, drop = 7, net = 7, drive = 3, smash = 1,
-              power = 2, speed = 4, legs = 4,
-              reach = 6 },
-  },
-  hitter = {
-    name = "You", title = "Big Hitter", tag = "Huge smash, clumsy touch, slow feet",
-    stats = { clear = 6, lift = 4, drop = 3, net = 3, drive = 5, smash = 9,
-              power = 9, speed = 5, legs = 7,
-              reach = 4 },
-  },
-  technician = {
-    name = "You", title = "Technician", tag = "Clean strokes, weak body",
-    stats = { clear = 7, lift = 7, drop = 7, net = 7, drive = 7, smash = 6,
-              power = 3, speed = 3, legs = 3,
-              reach = 4 },
-  },
-  athlete = {
-    name = "You", title = "Athlete", tag = "Reaches everything, sprays shots",
-    stats = { clear = 5, lift = 5, drop = 4, net = 4, drive = 5, smash = 5,
-              power = 7, speed = 9, legs = 8,
-              reach = 8 },
-  },
-  kai = {
-    name = "Kai", title = "Intermediate", tag = "Your opponent",
-    stats = { clear = 6, lift = 6, drop = 5, net = 5, drive = 6, smash = 6,
-              power = 6, speed = 6, legs = 6,
-              reach = 5 },
-  },
+-- Player levels: 6 all-rounders, from backyard to elite. Used for you and for the opponent.
+--
+-- stats (levels 1-10; curves in src/data/stats.lua and src/data/shots.lua `technique`):
+--   Technique: clear, lift, drop, net, drive, smash -> accuracy, coping when late / cross-court,
+--              how tight net shots are, and (clear/drop/smash) how high you can make contact
+--   Physical:  power -> max launch speed;  speed -> top speed and split-step push-off;
+--              stamina -> heart rate: rises slower when moving, drops faster when resting;
+--              legs  -> momentum kept from a run and how fast it fades
+--   Movement:  reach -> lunge;  reaction -> delay before moving;  recovery -> pause after hitting
+--
+-- brain (opponent AI only, src/core/ai.lua; never shown, not trainable):
+--   aimMargin m inside the standard targets (toward the middle), noise (sloppy choices),
+--   riskAversion, recovery "none" | "center", anticipation 0-3 (0 = recovery as above;
+--   1 = base depends on the shot just played; 2 = also knows what the opponent can't play
+--   from where they'll hit; 3 = also weighs the opponent's habits this match)
+local A = {}
+
+local function stats(t, p)
+  return { clear = t, lift = t, drop = t, net = t, drive = t, smash = t,
+           power = p.power, speed = p.speed, legs = p.legs, reach = p.reach,
+           reaction = p.reaction, recovery = p.recovery, stamina = p.stamina or p.legs }
+end
+
+A.levels = {
+  { key = "backyard", title = "Backyard", tag = "No overhead, no lunge, stays put",
+    stats = stats(1, { power = 1, speed = 1, legs = 1, reach = 1, reaction = 1, recovery = 1 }),
+    brain = { aimMargin = 1.0, noise = 0.6, riskAversion = 0.3, recovery = "none", anticipation = 0 } },
+  { key = "beginner", title = "Beginner", tag = "Learning the overhead, slow back to centre",
+    stats = stats(2, { power = 2, speed = 2, legs = 2, reach = 2, reaction = 2, recovery = 2 }),
+    brain = { aimMargin = 0.7, noise = 0.45, riskAversion = 0.5, recovery = "center", anticipation = 0 } },
+  { key = "intermediate", title = "Intermediate", tag = "All the shots, half of them miss",
+    stats = stats(3, { power = 4, speed = 4, legs = 3, reach = 3, reaction = 3, recovery = 3 }),
+    brain = { aimMargin = 0.5, noise = 0.35, riskAversion = 0.7, recovery = "center", anticipation = 0 } },
+  { key = "advanced", title = "Advanced", tag = "Strong club player, real smash",
+    stats = stats(6, { power = 6, speed = 6, legs = 6, reach = 5, reaction = 6, recovery = 6 }),
+    brain = { aimMargin = 0.3, noise = 0.2, riskAversion = 0.9, recovery = "center", anticipation = 1 } },
+  { key = "national", title = "National", tag = "Fast, accurate, reads your options",
+    stats = stats(8, { power = 8, speed = 8, legs = 8, reach = 5, reaction = 8, recovery = 8 }),
+    brain = { aimMargin = 0.15, noise = 0.1, riskAversion = 1.0, recovery = "center", anticipation = 2 } },
+  { key = "elite", title = "Elite", tag = "International / world class",
+    stats = stats(10, { power = 10, speed = 10, legs = 10, reach = 5, reaction = 10, recovery = 10 }),
+    brain = { aimMargin = 0.05, noise = 0.03, riskAversion = 1.1, recovery = "center", anticipation = 3 } },
 }
 
--- Order shown on the title screen (keys 1-6).
-A.playable = { "rookie", "trained", "touch", "hitter", "technician", "athlete" }
+-- Match-ready athlete definition for level i (1-6). name: shown in the HUD.
+function A.level(i, name)
+  local L = A.levels[i]
+  return { name = name or L.title, title = L.title, tag = L.tag, stats = L.stats, brain = L.brain, level = i }
+end
 
 return A
