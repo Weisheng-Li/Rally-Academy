@@ -15,6 +15,11 @@
 --   --speed N                  training demo: time speed (1, 3, 10, 30)
 --   --coach N                  training demo: click to coach every N seconds (at --mouse or the centre)
 --   --anytime                  --shot fires at SECONDS even mid-rally (no decision needed)
+--   --gif SECONDS              record screenshots/shot.gif from SECONDS in, then quit. While a gif
+--                              is set the game runs on a fixed step (one frame per gif frame)
+--   --giflen SECONDS           gif length (default 4)
+--   --giffps N                 gif frames per second (default 20)
+--   --gifscale N               gif pixel scale over the 640x360 canvas (default 2)
 local Dev = {}
 
 function Dev.parse(args)
@@ -33,6 +38,10 @@ function Dev.parse(args)
     elseif a == "--clock" then d.clock = v; i = i + 1
     elseif a == "--speed" then d.speed = tonumber(v); i = i + 1
     elseif a == "--coach" then d.coach = tonumber(v); i = i + 1
+    elseif a == "--gif" then d.gifAt = tonumber(v); i = i + 1
+    elseif a == "--giflen" then d.gifLen = tonumber(v); i = i + 1
+    elseif a == "--giffps" then d.gifFps = tonumber(v); i = i + 1
+    elseif a == "--gifscale" then d.gifScale = tonumber(v); i = i + 1
     elseif a == "--auto" then d.autoDecisions = tonumber(v); i = i + 1
     elseif a == "--hover" then d.hover = tonumber(v); i = i + 1
     elseif a == "--pick" then d.pick = tonumber(v); i = i + 1
