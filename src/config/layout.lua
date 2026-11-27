@@ -60,6 +60,74 @@ return {
     slow = { 0.40, 0.65, 1.00 }, slowTime = 2.0,   -- blue: floaty shots (clear, lift)
   },
 
+  -- Training demo (lovec . --demo training, or T on the title screen).
+  training = {
+    -- closer camera than the match: the near half fills the screen
+    camera = { centerX = 320, nearY = 352, farY = 128, nearWidth = 520, farWidth = 268, heightScale = 0.5 },
+    schedule = { x = 4, y = 4, w = 132, rowH = 12 },         -- coach's plan, top left
+    stats = { x = 504, y = 4, w = 132, rowH = 11 },          -- stat levels + rep bars, top right
+    now = { y = 4, w = 220 },                                -- clock + what he is doing, top centre
+    hintY = 350,
+    walkSpeed = 1.4,                                         -- m/s between spots
+    -- world spots (court metres; the gym uses the same floor coordinates)
+    court = {
+      base = { x = 0, y = 3.3 }, basket = { x = 1.4, y = -2.6 },   -- feeder: src/data/training.lua
+      bench = { x = 3.6, y = 4.4 }, water = { x = 2.85, y = 4.4 },
+      chat = { x = 0.7, y = 0.6 }, chatFeeder = { x = -0.1, y = -0.6 }, juggle = { x = 0.8, y = 3.6 },
+      jog = { x1 = -2.2, x2 = 2.2, y1 = 1.2, y2 = 5.9 },
+      entry = { x = 5.8, y = 4.2 },
+    },
+    gym = {
+      wallY = -1.8,
+      treadmill = { x = -2.3, y = -0.5 }, rack = { x = 0.2, y = -0.7 }, skip = { x = 0.3, y = 2.4 },
+      press = { x = 2.5, y = 0.9 }, dumbbells = { x = 3.3, y = -0.9 }, bench = { x = 2.4, y = 3.8 },
+      mat = { x = -1.7, y = 4.3 }, cooler = { x = -3.6, y = -1.2 }, water = { x = -3.0, y = -0.9 },
+      mirror = { x1 = 1.0, x2 = 3.6 }, selfie = { x = 2.3, y = -0.9 }, speaker = { x = -3.2 },
+      idle = { x = 0.3, y = 2.4 }, entry = { x = -5.6, y = 3.2 },
+    },
+    -- gym decoration (metres): plank width/length, wall panel width, trim height, windows,
+    -- poster, red rug, chequered tiles (skipping spot), plant, gym ball, loose weights
+    -- courtside bench (m): seat half sizes (long along y), seat height + thickness, legs at
+    -- +-legY; racket bag (centre y offset, half sizes, height) and the bottle's y offset
+    courtBench = { hx = 0.22, hy = 0.85, seat = 0.42, thick = 0.07, legY = 0.65, clear = 0.35,   -- clear: he walks round it this far off
+                   bag = { y = -0.1, len = 0.8, width = 0.24, hHead = 0.42, hHandle = 0.27, round = 0.18,
+                           roundBottom = 0.03, dir = { x = 0.8, y = 0.6 } },   -- dir: its length, on the ground
+                   bottleY = 0.6 },
+    gymLook = {
+      plank = 0.45, plankLen = 2.4, panel = 0.35, wallTop = 2.9,
+      windows = { { x1 = -4.9, x2 = -3.4 }, { x1 = -3.0, x2 = -1.6 } },
+      poster = { x = -1.05 },
+      rug = { x = 2.5, y = 0.9, hx = 1.0, hy = 0.7 },
+      tiles = { x = 0.3, y = 2.4, n = 4, size = 0.5 },
+      plant = { x = -4.4, y = 0.6 }, ball = { x = 3.9, y = 2.4, r = 0.33 },
+      bench = { hx = 0.7, hy = 0.18, legX = 0.5, padZ = 0.36, top = 0.45 },   -- pad from padZ up to top (m)
+      floorWeights = { { x = -0.4, y = 4.7, color = "dbRed" }, { x = -0.2, y = 5.0, color = "dbBlue" },
+                       { x = 3.7, y = 0.1, color = "dark", kettle = true } },
+    },
+    colors = {
+      feeder = { 0.70, 0.70, 0.75 },
+      -- gym: warm wood + beige, coloured mats (equipment stays charcoal metal)
+      gymFloor = { 0.80, 0.58, 0.36 }, gymFloorLight = { 0.85, 0.64, 0.42 }, gymFloorLine = { 0.62, 0.42, 0.25 },
+      wall = { 0.93, 0.84, 0.68 }, wallStripe = { 0.88, 0.77, 0.60 }, wallTrim = { 0.97, 0.97, 0.95 },
+      baseboard = { 0.55, 0.38, 0.24 }, glass = { 0.70, 0.84, 0.96 },
+      gymMat = { 0.30, 0.74, 0.62 }, gymMatEdge = { 0.20, 0.58, 0.48 },
+      rug = { 0.78, 0.22, 0.28 }, rugEdge = { 0.62, 0.14, 0.20 }, rubber = { 0.40, 0.40, 0.46 },
+      tileA = { 0.50, 0.50, 0.56 }, tileB = { 0.40, 0.40, 0.46 },
+      poster = { 0.35, 0.60, 0.90 }, trophy = { 1.0, 0.80, 0.20 },
+      dbRed = { 0.88, 0.25, 0.25 }, dbBlue = { 0.25, 0.50, 0.90 },
+      pot = { 0.62, 0.38, 0.22 }, potTop = { 0.50, 0.30, 0.18 }, leaf = { 0.35, 0.70, 0.30 },
+      leafDark = { 0.22, 0.52, 0.22 }, ball = { 0.25, 0.55, 0.95 },
+      pad = { 0.78, 0.24, 0.28 }, padSide = { 0.55, 0.14, 0.18 },
+      benchTop = { 0.25, 0.45, 0.85 }, benchSide = { 0.16, 0.30, 0.62 }, benchLeg = { 0.18, 0.32, 0.66 },
+      bag = { 0.42, 0.26, 0.19 }, bagTop = { 0.30, 0.18, 0.13 }, bagPanel = { 0.58, 0.38, 0.25 },
+      bagTrim = { 0.95, 0.55, 0.15 },
+      metal = { 0.62, 0.64, 0.70 }, dark = { 0.22, 0.22, 0.26 },
+      wood = { 0.55, 0.38, 0.22 }, mirror = { 0.80, 0.90, 0.97 }, water = { 0.45, 0.75, 1.0 },
+      banana = { 1.0, 0.88, 0.25 }, phone = { 0.65, 0.90, 1.0 },
+      perfect = { 1.0, 0.85, 0.30 }, levelup = { 1.0, 0.80, 0.20 },
+    },
+  },
+
   colors = {
     bg         = { 0.10, 0.12, 0.16 },
     floor      = { 0.20, 0.24, 0.30 },

@@ -3,7 +3,7 @@
 -- t:near(actual, expected, tol, msg)  t:ok(cond, msg)
 package.path = "./?.lua;" .. package.path
 
-local FILES = { "tests.test_body", "tests.test_figure", "tests.test_momentum", "tests.test_skid", "tests.test_animator", "tests.test_serve", "tests.test_heart" }
+local FILES = { "tests.test_body", "tests.test_figure", "tests.test_momentum", "tests.test_skid", "tests.test_animator", "tests.test_serve", "tests.test_heart", "tests.test_training" }
 
 local T = {}
 T.__index = T

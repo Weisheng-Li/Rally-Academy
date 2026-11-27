@@ -180,6 +180,7 @@ function Figure.stance(cam, st, side)
   local right = side
   local f = Figure.racket(shX + nx * hw * right, shY + ny * hw * right, k, right, st.h, st.racketAngle)
   f.k, f.bodyW, f.bodyH = k, bodyW, Body.HEIGHT * k
+  f.right = right
   f.groundX, f.groundY = gx, gy
   f.hipX, f.hipY = hipX, hipY
   f.shoulderMidX, f.shoulderMidY = shX, shY
@@ -192,6 +193,43 @@ function Figure.stance(cam, st, side)
   f.backPlanted = planted
   f.legW = math.max(1, bodyW * 0.38)
   return f
+end
+
+-- Arm from a posed sprite's racket shoulder (Figure.stance result) at `angle` rad above
+-- horizontal, toward the sprite's right (mirror = -1 for the other arm, from the other
+-- shoulder). Used when the hand holds something instead of the racket.
+-- reach (0..1, default 1): shoulder-to-hand distance as a share of the arm (a bent arm).
+function Figure.arm(f, angle, mirror, reach)
+  mirror = mirror or 1
+  local right = f.right * mirror
+  local sx = f.shoulderMidX + right * f.bodyW / 2
+  local sy = f.shoulderMidY
+  local L = Body.ARM_LENGTH * f.k * (reach or 1)
+  return { shoulderX = sx, shoulderY = sy, handX = sx + right * math.cos(angle) * L,
+           handY = sy - math.sin(angle) * L, len = L }
+end
+
+-- Athlete lying on his back on the floor (nap), head toward screen x `facing` (+1 / -1),
+-- body centred on ground point pos. Same sprite scale as standing, so it is as long as he is
+-- tall. Returns pixel geometry: shadow centre, legs line, torso quad, head circle.
+Figure.LIE_HEIGHT = 0.12   -- m, the body's centre line above the floor
+function Figure.lying(cam, pos, facing)
+  local k = Figure.scale(cam, pos.x, pos.y)
+  local gx, gy = cam:project(pos.x, pos.y, 0)
+  local y = gy - Figure.LIE_HEIGHT * k
+  local x0 = gx - facing * Body.HEIGHT * k / 2          -- feet
+  local function at(m) return x0 + facing * m * k end
+  local headM = (Body.HEIGHT - Body.SHOULDER_HEIGHT) / 2      -- head radius, m
+  local headR = headM * k
+  local hw = Body.WIDTH * k / 2 * 0.7                     -- seen from the side: a bit thinner
+  local hip, sh = at(Body.HIP_HEIGHT), at(Body.SHOULDER_HEIGHT)
+  return {
+    k = k, groundX = gx, groundY = gy, feetX = x0, headX = at(Body.HEIGHT - headM),
+    legs = { at(0), y, hip, y },
+    torso = { hip, y - hw, sh, y - hw, sh, y + hw, hip, y + hw },
+    head = { x = at(Body.HEIGHT - headM), y = y - headR * 0.3, r = headR },
+    length = Body.HEIGHT * k, legW = math.max(1, Body.WIDTH * k * 0.38),
+  }
 end
 
 function Figure.shuttleRadius(k) return math.max(Figure.MIN_SHUTTLE_RADIUS, Body.SHUTTLE_DIAMETER / 2 * k) end

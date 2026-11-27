@@ -11,6 +11,8 @@
 --   --skidshot SECONDS         save it SECONDS into the first landed shuttle's skid instead
 --   --demo NAME                open a prototype demo scene (src/scenes/demo_NAME.lua), e.g. balance
 --   --clip N                   lunge demo: loop only clip N
+--   --clock HH:MM              training demo: start at this time of day
+--   --speed N                  training demo: time speed (1, 3, 10, 30)
 --   --anytime                  --shot fires at SECONDS even mid-rally (no decision needed)
 local Dev = {}
 
@@ -27,6 +29,8 @@ function Dev.parse(args)
     elseif a == "--zoom" then d.zoom = true
     elseif a == "--anytime" then d.anytime = true
     elseif a == "--clip" then d.clip = tonumber(v); i = i + 1
+    elseif a == "--clock" then d.clock = v; i = i + 1
+    elseif a == "--speed" then d.speed = tonumber(v); i = i + 1
     elseif a == "--auto" then d.autoDecisions = tonumber(v); i = i + 1
     elseif a == "--hover" then d.hover = tonumber(v); i = i + 1
     elseif a == "--pick" then d.pick = tonumber(v); i = i + 1

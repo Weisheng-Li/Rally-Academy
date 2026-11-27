@@ -1,7 +1,7 @@
 -- Title / level picker: pick your level (left) and the opponent's (right), stats compared in
 -- the middle. Same 6 levels for both (src/data/athletes.lua).
 --   mouse: click a level in either column, click Play
---   keys:  Up/Down your level, W/S the opponent's, 1-6 your level, Enter play, D footwork demo
+--   keys:  Up/Down your level, W/S the opponent's, 1-6 your level, Enter play, D footwork demo, T training demo
 local Layout = require("src.config.layout")
 local Athletes = require("src.data.athletes")
 local Draw = require("src.view.draw")
@@ -101,7 +101,7 @@ function Title:draw()
   Draw.panel(p.x, p.y, p.w, p.h)
   if self.hoverPlay then Draw.color(C.good); love.graphics.rectangle("line", p.x + 1.5, p.y + 1.5, p.w - 3, p.h - 3) end
   Draw.text("Play", p.x, p.y + 6, C.text, Assets.fonts.normal, "center", p.w)
-  Draw.text("Up/Down: your level   W/S: opponent   Enter: play   D: footwork demo   Esc: quit",
+  Draw.text("Up/Down: your level   W/S: opponent   Enter: play   D: footwork demo   T: training demo   Esc: quit",
     0, M.hintY, C.textDim, Assets.fonts.small, "center", Layout.width)
 end
 
@@ -123,6 +123,7 @@ function Title:keypressed(key)
   if key == "s" then self.opp = math.min(N, self.opp + 1) end
   if key == "return" or key == "space" then self:_start() end
   if key == "d" then self.app:switch("demo_balance") end
+  if key == "t" then self.app:switch("demo_training") end
   if key == "escape" then love.event.quit() end
 end
 

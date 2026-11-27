@@ -18,6 +18,7 @@ local Body = {
   HIT_LEFT = 0.45,
   HIT_BEHIND = 0.20,
   READY_ANGLE = 60,         -- degrees above horizontal when not hitting
+  ARM_LENGTH = 0.62,        -- m, shoulder to hand (training demo: holding a bottle, phone, weights)
 }
 
 Body.HIP_HEIGHT = Body.HEIGHT * 0.42                            -- 0.735 m, leg length when standing

@@ -9,5 +9,7 @@
 - Unit tests: `lovec tests` (all must pass). Body/racket sizes live only in `src/core/body.lua`; drawing goes through `src/view/figure.lua` so tests can check what is drawn matches the model. Add a test when adding drawn geometry.
 - After every change, launch the game for the user as the last step: `"C:\Program Files\LOVE\love.exe" .` in the background.
 - Verify visual changes with a dev screenshot (`--shot`, see `src/dev.lua`); output lands in `%APPDATA%\LOVE\rally_academy\screenshots\`.
+- Art direction: figures have no arms or hands; a held prop (bottle, phone, dumbbell) floats where the hand would be (`Figure.arm`).
+- Training (idle) demo: `lovec . --demo training [--clock HH:MM] [--speed N]` (or T on the title screen). Sim in `src/core/training.lua`, schedule/habits/rep curve in `src/data/training.lua`, drawing + poses in `src/view/training_view.lua`, spots/camera in `layout.training`.
 - Footwork/lunge animation demo (kept for tuning): `lovec . --demo balance` (or D on the title screen); pick clips from the menu on the left; `--clip N` opens the N-th clip. Pose geometry is `Figure.stance` in `src/view/figure.lua`; gait and lunge numbers are at the top of `src/scenes/demo_balance.lua`.
 - Design doc (rules source of truth): https://claude.ai/artifact/EqpHxhQEHdQG2t7RYCGmgh
