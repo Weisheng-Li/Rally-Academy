@@ -11,7 +11,8 @@
 --               cur (this rep: i, t0 / contactT / endT (activity seconds), and for drills the
 --               feed + ret flight paths, contact, outcome, quality)
 --   s.skills[name] = { level, progress }, s.energy (0..1), s.music (headphones on),
---   s.bubble / s.feederBubble ({ text, t }), s.log, s.events (drained by the view)
+--   s.bubble / s.feederBubble / s.coachLine ({ text, t }), s.hype (coach clicks, fading),
+--   s.pace (his speed this update, Training.speed), s.log, s.events (drained by the view)
 local T = require("src.data.training")
 local Traj = require("src.core.trajectory")
 local Shots = require("src.core.shots")
@@ -81,6 +82,33 @@ local function addProgress(s, name, amount)
   end
 end
 
+---------------------------------------------------------------------------- coach clicks
+-- Clicking cheers him on: the coach shouts something every click and each click adds 1 hype.
+-- Hype fades over time (halves every T.coach.halfLife s). His speed is
+--   1 + (max - 1) * (1 - exp(-hype / ramp))
+-- so spamming works but with diminishing returns: ~10 quick clicks get him close to 2x,
+-- more clicks add little. At speed x his activity runs x times faster (reps, breaks, walking,
+-- the feeder) while the schedule clock keeps its pace, so he packs more reps into each block
+-- (and tires sooner: energy changes with his own time).
+function Training.speed(s)
+  local C = T.coach
+  return 1 + (C.max - 1) * (1 - math.exp(-s.hype / C.ramp))
+end
+
+-- One click. The coach's line depends on what he is doing.
+function Training.coach(s)
+  s.hype = s.hype + 1
+  local a = s.activity
+  local b = Training.block(s)
+  local key = (b and b.kind == "free" and "lunch") or (a.kind == "drill" and "drill") or
+              (a.kind == "exercise" and "gym") or (a.kind == "habit" and "rest") or "other"
+  local line = pick(s.rng, T.coach.lines[key])
+  if s.coachLine and s.coachLine.text == line then line = pick(s.rng, T.coach.lines[key]) end
+  s.coachLine = { text = line, t = 1.6, life = 1.6, shout = true }
+  if s.rng() < T.coach.reply then Training.say(s, "yesCoach") end
+  event(s, { type = "coach" })
+end
+
 -- His stats as the match's shot model reads them (levels; see src/data/athletes.lua).
 function Training.stats(s)
   local st = { reach = 3, reaction = 3, recovery = 3 }
@@ -118,7 +146,8 @@ function Training.drillRep(s, shotName, rng)
   local stats = Training.stats(s)
   local ctx = { stats = stats, from = cpos, h0 = ch, contact = { state = "ontime" },
                 maxSpeed = Curve.at(Stats.power, stats.power),
-                hrMul = 1 + T.quality.tired * (1 - s.energy) }   -- tired: shakier hands
+                -- tired: shakier hands
+                hrMul = 1 + T.quality.tired * (1 - s.energy) }
   local ev = Shots.evaluate(ctx, aim, S.shot)
   local rep = { feed = feed, dt = dt, contact = cpos, h = ch, feedTime = ctime, aim = aim, success = ev.success }
   if not ev.available then              -- can't play it from there: straight into the net
@@ -143,7 +172,8 @@ local function startRep(s, a, t0)
     cur.contactT = t0 + cur.feedTime
     cur.endT = cur.contactT + math.max(cur.retTime + T.drill.after, T.drill.recover)
   else
-    cur = { quality = "good", contactT = t0 + a.contact * a.repTime, endT = t0 + a.repTime }
+    local len = a.repTime
+    cur = { quality = "good", contactT = t0 + a.contact * len, endT = t0 + len }
   end
   cur.i, cur.t0 = a.started, t0
   a.cur = cur
@@ -206,7 +236,8 @@ local function exerciseSet(s, name, energyUse)
   local n = irange(s.rng, E.reps)
   local main, best = nil, -1
   for stat, g in pairs(E.gains) do if g > best then main, best = stat, g end end
-  return activity("exercise", name, E.label, 2.0 + n * E.repTime,
+  -- dur is set when the last rep starts (reps are quicker while the coach pushes him)
+  return activity("exercise", name, E.label, math.huge,
     { lead = 2.0, repTime = E.repTime, contact = 0.5, reps = 0, started = 0, repsTarget = n, gains = E.gains,
       nextStart = 2.0,
       main = main, unit = E.unit, energyUse = energyUse or "gym", onPlan = true })
@@ -352,12 +383,16 @@ end
 ---------------------------------------------------------------------------- update
 local function advance(s, a, dt)
   a.t = a.t + dt
-  if a.kind ~= "home" then s.clock = s.clock + dt * T.minutesPerSecond end
+  -- the schedule clock runs at real pace: his own time runs s.pace times faster (coach clicks)
+  if a.kind ~= "home" then s.clock = s.clock + dt / (s.pace or 1) * T.minutesPerSecond end
   local E = T.energy
   local use = a.energyUse
   if use == "rest" then s.energy = math.min(1, s.energy + E.rest * dt)
   elseif use == "nap" then s.energy = math.min(1, s.energy + E.nap * dt)
-  elseif use and E[use] and a.t > (a.lead or 0) then s.energy = math.max(0, s.energy - E[use] * dt) end
+  elseif use and E[use] and a.t > (a.lead or 0) then
+    local drain = E[use]
+    s.energy = math.max(0, s.energy - drain * dt)
+  end
 
   if a.kind == "walk" and not a.switched and a.t >= a.dur / 2 then
     a.switched = true
@@ -390,6 +425,11 @@ end
 function Training.update(s, dt)
   if s.bubble then s.bubble.t = s.bubble.t - dt; if s.bubble.t <= 0 then s.bubble = nil end end
   if s.feederBubble then s.feederBubble.t = s.feederBubble.t - dt; if s.feederBubble.t <= 0 then s.feederBubble = nil end end
+  if s.coachLine then s.coachLine.t = s.coachLine.t - dt; if s.coachLine.t <= 0 then s.coachLine = nil end end
+  -- coach clicks: his pace for this update, then the hype fades (real time)
+  s.pace = Training.speed(s)
+  s.hype = s.hype * 0.5 ^ (dt / T.coach.halfLife)
+  dt = dt * s.pace
   local guard = 0
   while dt > 1e-9 and guard < 1000 do
     guard = guard + 1
@@ -415,7 +455,7 @@ end
 function Training.new(opts)
   opts = opts or {}
   local s = { rng = opts.rng or math.random, day = 0, events = {}, log = {}, skills = {},
-              energy = 1, missStreak = 0, perfectStreak = 0, setsDone = 0, totalReps = 0,
+              energy = 1, missStreak = 0, perfectStreak = 0, setsDone = 0, totalReps = 0, hype = 0, pace = 1,
               music = false }
   for name, level in pairs(T.start) do s.skills[name] = { level = level, progress = 0 } end
   newDay(s)

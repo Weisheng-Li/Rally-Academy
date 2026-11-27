@@ -162,6 +162,54 @@ return {
     end
   end,
 
+  ["coach clicks: every click speeds him up, less and less, toward max"] = function(t)
+    local C = Training.data.coach
+    local s = Training.new({ rng = lcg(4) })
+    t:near(Training.speed(s), 1, 1e-12, "no clicks, normal pace")
+    local last, gains = 1, {}
+    for i = 1, 30 do
+      Training.coach(s)
+      t:ok(s.coachLine ~= nil, "the coach says something every click")
+      local sp = Training.speed(s)
+      gains[i] = sp - last
+      t:ok(gains[i] > 0, "every click helps a bit")
+      if i > 1 then t:ok(gains[i] < gains[i - 1], "each click helps less than the one before") end
+      last = sp
+    end
+    local s10 = Training.new({ rng = lcg(4) })
+    for _ = 1, 10 do Training.coach(s10) end
+    t:ok(Training.speed(s10) > 1.85 and Training.speed(s10) < 2.0, "10 clicks: close to 2x")
+    t:ok(Training.speed(s) < C.max, "never past max")
+    t:ok(Training.speed(s) - Training.speed(s10) < 0.3, "20 more clicks add little")
+  end,
+
+  ["coach hype fades over time"] = function(t)
+    local C = Training.data.coach
+    local s = Training.new({ rng = lcg(4) })
+    for _ = 1, 10 do Training.coach(s) end
+    local h = s.hype
+    Training.update(s, C.halfLife)
+    t:near(s.hype, h / 2, 1e-6, "halves every halfLife s")
+    Training.update(s, 60)
+    t:ok(Training.speed(s) < 1.01, "back to normal after a while")
+  end,
+
+  ["cheering packs more reps into the same schedule time"] = function(t)
+    local function reps(click)
+      local s = Training.new({ rng = lcg(12), clock = Training.minutes("09:55") })
+      local n, t0 = 0, s.clock
+      while s.clock < t0 + 20 do
+        if click then Training.coach(s); Training.coach(s) end   -- spamming
+        Training.update(s, 0.05)
+        for _, e in ipairs(s.events) do if e.type == "rep" then n = n + 1 end end
+        s.events = {}
+      end
+      return n
+    end
+    local calm, cheered = reps(false), reps(true)
+    t:ok(cheered > calm * 1.5, string.format("%d reps cheered vs %d calm", cheered, calm))
+  end,
+
   ["arm sprite is the model's arm length"] = function(t)
     local cam = Camera.new(Layout.training.camera)
     for _, y in ipairs({ 1.0, 3.3, 5.5 }) do

@@ -261,6 +261,14 @@ function View:steer(goal)
   return goal
 end
 
+-- How far through the current gym rep (0..1). Reps vary in length (quicker while the coach
+-- pushes him), so this comes from the rep's own start and end.
+function View:repPhase(a)
+  local cur = a.cur
+  if not cur then return 0 end
+  return math.max(0, math.min(1, (a.t - cur.t0) / math.max(1e-6, cur.endT - cur.t0)))
+end
+
 function View:walkTo(goal, dt, speed)
   goal = self:steer(goal)
   local d = dist(self.pos, goal)
@@ -325,7 +333,7 @@ function View:update(s, dt)
     local J = CS.jog
     local w, h = J.x2 - J.x1, J.y2 - J.y1
     local P = 2 * (w + h)
-    local d = ((a.t - a.lead) / a.repTime) * P
+    local d = (self:repPhase(a) + math.max(0, (a.cur and a.cur.i or 1) - 1)) * P   -- one lap per rep
     local dd = d % P
     local p, dir
     if dd < w then p, dir = { x = J.x1 + dd, y = J.y2 }, SIDE_R
@@ -441,7 +449,7 @@ function View:playerPose(s)
 
   if a.kind == "exercise" then
     local ts = math.max(0, a.t - a.lead)
-    local u = (ts % a.repTime) / a.repTime
+    local u = self:repPhase(a)
     P.racket = false
     st.dir = SIDE_R
     if n == "squat" then
@@ -589,6 +597,12 @@ function View:drawBody(f, lift, color, P)
   love.graphics.polygon("fill", f.torso)
   Draw.color(skin, alpha)
   love.graphics.circle("fill", f.head.x, f.head.y, f.head.r)
+  if P.cap then          -- coach's cap: crown over the top of the head, brim to the front
+    Draw.color(P.cap, alpha)
+    love.graphics.arc("fill", f.head.x, f.head.y - f.head.r * 0.1, f.head.r * 1.05, math.pi, math.pi * 2)
+    love.graphics.rectangle("fill", f.head.x + (f.right > 0 and 0 or -f.head.r * 1.6), f.head.y - f.head.r * 0.25,
+      f.head.r * 1.6, math.max(1, f.head.r * 0.3))
+  end
   if P.drink then        -- bottle tipped up at his mouth (cap at the front of the face)
     View.drawBottle(f.head.x + f.right * f.head.r * 0.9, f.head.y + f.head.r * 0.3, f.k, math.pi + f.right * 0.6)
   end
@@ -643,9 +657,42 @@ function View.drawBottle(x, y, k, rot)
   love.graphics.pop()
 end
 
+-- Working harder (the coach's cheering sped him up): two sweat drops run down from his temples
+-- and fall off, one after the other. self.time runs at his pace, so they drip faster the
+-- faster he goes.
+function View:drawWorkingHard(head)
+  local r, t = head.r, self.time
+  local d = math.max(1, r * 0.28)
+  for i, side in ipairs({ -1, 1 }) do
+    local ph = (t * 0.9 + i * 0.45) % 1
+    local px = head.x + side * r * 0.95
+    local py = head.cy - r * 0.2 + ph * ph * r * 3.5          -- slides, then falls faster
+    Draw.color(TC.sweat, ph < 0.8 and 1 or (1 - ph) / 0.2)
+    love.graphics.circle("fill", px, py, d)
+    love.graphics.polygon("fill", px - d, py, px + d, py, px, py - d * 2.4)
+  end
+end
+
+-- The coach bounces on his toes for a moment when he shouts (body lift, m).
+function View:coachHop(s)
+  local line = s.coachLine
+  if not line or not line.shout then return 0 end
+  local age = line.life - line.t
+  if age > 0.3 then return 0 end
+  return 0.08 * math.sin(math.pi * age / 0.3)
+end
+
 function View:drawProp(prop, g, f, arm)
   if not prop then return end
   local k = f.k
+  if prop == "clipboard" then
+    local w, h = math.max(3, 0.16 * k), math.max(4, 0.22 * k)
+    Draw.color(TC.wood)
+    love.graphics.rectangle("fill", g.handX - w / 2, g.handY - h / 2, w, h)
+    Draw.color(TC.wallTrim)
+    love.graphics.rectangle("fill", g.handX - w / 2 + 1, g.handY - h / 2 + 2, w - 2, h - 3)
+    return
+  end
   if prop == "bottle" then
     View.drawBottle(g.handX, g.handY - BOTTLE.h * k * 0.6, k, 0)
   elseif prop == "phone" then
@@ -1078,7 +1125,7 @@ function View:draw(s)
     end
     self:drawBody(f, P.lift, C.near, P)
     local liftPx = (P.lift or 0) * f.k
-    head = { x = f.head.x, y = f.head.y - f.head.r - liftPx }
+    head = { x = f.head.x, y = f.head.y - f.head.r - liftPx, cy = f.head.y - liftPx, r = f.head.r }
     if P.juggle then                       -- shuttle bouncing on the strings
       local ph = (self.time / 0.55) % 1
       local hgt = 4 * ph * (1 - ph) * 0.6 * f.k
@@ -1128,8 +1175,25 @@ function View:draw(s)
       end
       st.racketAngle = angle
       local f = Figure.stance(cam, st, -1)
-      self:drawBody(f, 0, TC.feeder, {})
-      if s.feederBubble then bubble(s.feederBubble.text, f.head.x, f.head.y - f.head.r - 2, s.feederBubble.t * 3) end
+      -- the feeder is the coach: his cap and jacket, and he shouts the coaching lines
+      self:drawBody(f, self:coachHop(s), TC.coachShirt, { cap = TC.coachCap })
+      local talk = s.coachLine or s.feederBubble
+      if talk then bubble(talk.text, f.head.x, f.head.y - f.head.r - 2 - self:coachHop(s) * f.k, talk.t * 3) end
+    end }
+  end
+  -- gym: the coach stands by and watches him (facing him), shouting when you click
+  if s.location == "gym" then
+    local cp = GS.coach
+    items[#items + 1] = { y = cp.y, draw = function()
+      local dir = norm(self.pos.x - cp.x, self.pos.y - cp.y) or FACE_NET
+      local st = standing(cp, dir)
+      st.lean = 0.04 * math.sin(self.time * 0.8)                  -- shifts his weight a little
+      local f = Figure.stance(cam, st, 1)
+      self:drawBody(f, self:coachHop(s), TC.coachShirt,
+        { cap = TC.coachCap, racket = false, arms = { { angle = math.rad(-30), reach = 0.6, prop = "clipboard" } } })
+      if s.coachLine then
+        bubble(s.coachLine.text, f.head.x, f.head.y - f.head.r - 2 - self:coachHop(s) * f.k, s.coachLine.t * 3)
+      end
     end }
   end
   -- shuttles flicked toward the basket
@@ -1150,6 +1214,8 @@ function View:draw(s)
   table.sort(items, function(p, q) return p.y < q.y end)
   for _, it in ipairs(items) do it.draw() end
 
+  -- working harder (coach clicks sped him up): see View:drawWorkingHard
+  if head and head.r and (s.pace or 1) > 1.05 then self:drawWorkingHard(head) end
   -- rep popups rising from his head, his speech bubble
   if head then
     for _, p in ipairs(self.popups) do

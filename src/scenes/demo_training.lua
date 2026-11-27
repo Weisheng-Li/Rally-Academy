@@ -3,7 +3,8 @@
 -- between. Every rep pops up and fills its stat bar a little.
 --   lovec . --demo training [--clock HH:MM] [--speed N] [--seed N]   (or T on the title screen)
 -- Keys: 1-4 speed (x1 x3 x10 x30)   Space pause   Esc title
--- Demo only: click a block in the coach's plan to jump there.
+-- Click anywhere (spam away) to have the coach cheer him on: he speeds up, up to about 2x
+-- (Training.coach). Demo only: click a block in the coach's plan to jump there.
 local Layout = require("src.config.layout")
 local Camera = require("src.view.camera")
 local Draw = require("src.view.draw")
@@ -15,6 +16,7 @@ local TL = Layout.training
 local C, TC = Layout.colors, Layout.training.colors
 local TD = Training.data
 local SPEEDS = { 1, 3, 10, 30 }
+local WORKING = 1.05      -- coach clicks: pace above this shows as working harder
 
 local Demo = {}
 Demo.__index = Demo
@@ -37,6 +39,15 @@ end
 function Demo:update(dt)
   local mx, my = self.app.mouse.x, self.app.mouse.y
   self.hoverRow = self:rowAt(mx, my)
+  local every = self.app.dev.coach                 -- dev: click to coach on a timer
+  if every and not self.paused then
+    self.coachT = (self.coachT or 0) + dt
+    if self.coachT >= every then
+      self.coachT = 0
+      local m = self.app.dev.mouse or { x = 320, y = 200 }
+      self:mousepressed(m.x, m.y, 1)
+    end
+  end
   if self.paused then return end
   local sim = self.sim
   local step = dt * self.speed
@@ -44,7 +55,7 @@ function Demo:update(dt)
   local n = math.max(1, math.ceil(step / 0.05))
   for _ = 1, n do
     Training.update(sim, step / n)
-    self.view:update(sim, step / n)
+    self.view:update(sim, step / n * sim.pace)   -- he (and the drips) move at his own pace
     for _, e in ipairs(sim.events) do
       if e.type == "rep" or e.type == "levelup" then self.flash[e.skill] = e.type == "levelup" and 2.0 or 0.6 end
     end
@@ -79,14 +90,17 @@ function Demo:rowAt(x, y)
   end
 end
 
--- Demo only: jump to the start of a block.
+-- Click the plan (demo only): jump to the start of that block. Click anywhere else: coach him.
 function Demo:mousepressed(x, y, button)
   if button ~= 1 then return end
   local i = self:rowAt(x, y)
-  if not i then return end
-  Training.jumpTo(self.sim, Training.schedule[i].start)
-  self.sim.events = {}
-  self.view:reset()
+  if i then
+    Training.jumpTo(self.sim, Training.schedule[i].start)
+    self.sim.events = {}
+    self.view:reset()
+    return
+  end
+  Training.coach(self.sim)      -- the coach (feeder on court, coach in the gym) says it
 end
 
 function Demo:drawSchedule()
@@ -161,7 +175,11 @@ function Demo:drawNow()
   local sim = self.sim
   local a = sim.activity
   local x = (Layout.width - N.w) / 2
-  Draw.panel(x, N.y, N.w, 30)
+  -- one extra line while the coach's cheering speeds him up
+  local extra, extraCol
+  if sim.pace > WORKING then extra, extraCol = "Working harder!", TC.coach end
+  Draw.panel(x, N.y, N.w, extra and 40 or 30)
+  if extra then Draw.text(extra, x, N.y + 28, extraCol, Assets.fonts.small, "center", N.w) end
   Draw.text(string.format("Day %d", sim.day), x + 6, N.y + 4, C.textDim, Assets.fonts.small)
   Draw.text(Training.clockText(sim.clock), x, N.y + 2, C.text, Assets.fonts.normal, "center", N.w)
   local speed = self.paused and "paused" or ("x" .. self.speed)
@@ -190,7 +208,7 @@ function Demo:draw()
   self:drawSchedule()
   self:drawStats()
   self:drawNow()
-  Draw.text("Click the plan to jump   1-4 speed   Space pause   Esc title", 0, TL.hintY, C.textDim,
+  Draw.text("Click to coach   Click the plan to jump   1-4 speed   Space pause   Esc title", 0, TL.hintY, C.textDim,
     Assets.fonts.small, "right", Layout.width - 6)
 end
 

@@ -83,7 +83,7 @@ return {
       press = { x = 2.5, y = 0.9 }, dumbbells = { x = 3.3, y = -0.9 }, bench = { x = 2.4, y = 3.8 },
       mat = { x = -1.7, y = 4.3 }, cooler = { x = -3.6, y = -1.2 }, water = { x = -3.0, y = -0.9 },
       mirror = { x1 = 1.0, x2 = 3.6 }, selfie = { x = 2.3, y = -0.9 }, speaker = { x = -3.2 },
-      idle = { x = 0.3, y = 2.4 }, entry = { x = -5.6, y = 3.2 },
+      idle = { x = 0.3, y = 2.4 }, entry = { x = -5.6, y = 3.2 }, coach = { x = -1.3, y = 1.5 },
     },
     -- gym decoration (metres): plank width/length, wall panel width, trim height, windows,
     -- poster, red rug, chequered tiles (skipping spot), plant, gym ball, loose weights
@@ -105,7 +105,6 @@ return {
                        { x = 3.7, y = 0.1, color = "dark", kettle = true } },
     },
     colors = {
-      feeder = { 0.70, 0.70, 0.75 },
       -- gym: warm wood + beige, coloured mats (equipment stays charcoal metal)
       gymFloor = { 0.80, 0.58, 0.36 }, gymFloorLight = { 0.85, 0.64, 0.42 }, gymFloorLine = { 0.62, 0.42, 0.25 },
       wall = { 0.93, 0.84, 0.68 }, wallStripe = { 0.88, 0.77, 0.60 }, wallTrim = { 0.97, 0.97, 0.95 },
@@ -125,6 +124,8 @@ return {
       wood = { 0.55, 0.38, 0.22 }, mirror = { 0.80, 0.90, 0.97 }, water = { 0.45, 0.75, 1.0 },
       banana = { 1.0, 0.88, 0.25 }, phone = { 0.65, 0.90, 1.0 },
       perfect = { 1.0, 0.85, 0.30 }, levelup = { 1.0, 0.80, 0.20 },
+      coach = { 1.0, 0.72, 0.30 }, sweat = { 0.70, 0.88, 1.0 },
+      coachShirt = { 0.85, 0.28, 0.25 }, coachCap = { 0.15, 0.18, 0.30 },   -- coach (= the feeder on court)
     },
   },
 

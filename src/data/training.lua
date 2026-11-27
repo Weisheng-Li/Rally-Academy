@@ -126,6 +126,22 @@ T.oversleep = { chance = 0.5, extra = { 4, 10 } }
 T.walk = 6
 T.lateMorning = { -2, 8 }
 
+-- Coach clicks: every click the coach shouts a line and adds 1 hype; hype halves every
+-- halfLife s. Speed = 1 + (max - 1) * (1 - exp(-hype / ramp)): about 1.9x after 10 quick
+-- clicks, close to max with many more. reply: chance he answers a shout.
+T.coach = {
+  max = 2.2, ramp = 6, halfLife = 4, reply = 0.08,
+  lines = {
+    drill = { "Faster feet!", "Come on, lunge!", "Get low!", "Attack it!", "Again, quicker!", "Split step!",
+              "Watch the shuttle!", "Good, again!", "Move, move!" },
+    gym   = { "Push!", "Two more!", "Don't stop!", "Feel the burn!", "Breathe, push!", "Drive it up!",
+              "Keep going!", "Yes!" },
+    rest  = { "Quick break!", "Hydrate fast!", "Clock's ticking!", "Shake it out!", "Up you get soon!" },
+    lunch = { "Eat up, champ.", "Rest well, big afternoon!", "Chew faster!", "Lunch is lunch." },
+    other = { "Hustle!", "Pick it up!", "Come on!", "Let's go!" },
+  },
+}
+
 -- Things he says. Picked at random from the list for the occasion.
 T.lines = {
   perfect   = { "Yes!", "Clean!", "Nice one", "That's it" },
@@ -143,6 +159,7 @@ T.lines = {
   overslept = { "Five more minutes...", "zzz" },
   selfie    = { "Gains", "*click*" },
   snack     = { "Mmm", "Banana time" },
+  yesCoach  = { "Yes coach!", "On it!", "Okay!" },
 }
 
 return T
