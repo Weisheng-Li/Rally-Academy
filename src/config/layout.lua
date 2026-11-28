@@ -92,7 +92,7 @@ return {
       desk = { x = 1.95, y = -0.3, hx = 1.0, hy = 0.35, h = 1.05 }, receptionist = { x = 1.95, y = -1.05 },
       deskFront = { x = 1.7, y = 0.6 }, deskSign = { x1 = 0.9, x2 = 3.0 },
       board = { x1 = -1.7, x2 = 0.3, z1 = 1.0, z2 = 2.1 },              -- whiteboard on the back wall
-      wcDoor = { x1 = -3.0, x2 = -2.1, h = 2.1 }, wc = { x = -2.55, y = -1.25 },
+      wcDoor = { x1 = -2.95, x2 = -2.35, h = 2.4 }, wc = { x = -2.65, y = -1.25 },   -- tall and narrow: heights are squashed on screen
       shopWall = { x1 = -9, x2 = -3.3 },                                -- slatwall with rackets + shoes
       cabinet = { x = -5.2, y = -1.3, hx = 1.2, hy = 0.32, h = 0.85 }, browse = { x = -4.8, y = -0.45 },
       stringer = { x = -2.4, y = 1.3 }, stringerWatch = { x = -1.7, y = 1.7 },

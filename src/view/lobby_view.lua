@@ -201,7 +201,7 @@ local function drawShopWall(cam)
 end
 
 ---------------------------------------------------------------------------- WC, board, desk sign
-local function drawWC(cam, busy)
+local function drawWC(cam)
   local D = LS.wcDoor
   local x, y, w, h = wallRect(cam, D.x1, D.x2, 0, D.h)
   Draw.color(TC.doorFrame)
@@ -213,13 +213,11 @@ local function drawWC(cam, busy)
   love.graphics.rectangle("line", x + 3.5, y + h * 0.5, w - 7, h * 0.45)
   Draw.color(TC.metal)
   love.graphics.rectangle("fill", x + w - 6, y + h * 0.52, 3, 2)
-  -- WC plate over the door, the occupied light on its right
+  -- WC plate over the door
   local px, py = math.floor(x + w / 2 - 10), math.floor(y - 15)
   Draw.color(TC.desk)
   love.graphics.rectangle("fill", px, py, 20, 11)
   Draw.sign("WC", px, py, 20, 11, C.text, Assets.fonts.small)
-  Draw.color(busy and C.bad or C.good)
-  love.graphics.circle("fill", px + 25, py + 5.5, 2)
 end
 
 local function drawBoard(cam, s, hot)
@@ -268,7 +266,7 @@ function Lobby.draw(view, s, items, here)
   local a = s.activity
   drawFloorAndWall(view, cam)
   drawShopWall(cam)
-  drawWC(cam, here and a.name == "bathroom" and view.arrived)
+  drawWC(cam)
   drawBoard(cam, s, view.hover == "board")
   drawDeskWall(cam)
 
