@@ -11,6 +11,7 @@ local CD = require("src.data.career")
 local Athletes = require("src.data.athletes")
 local Training = require("src.core.training")
 local Tournament = require("src.core.tournament")
+local Progress = require("src.data.progress")
 
 local Career = {}
 Career.data = CD
@@ -104,6 +105,32 @@ function Career.swapSlots(c, i, j)
   fill(c.slots[i], c.plan[i]); fill(c.slots[j], c.plan[j])
   frame(c)
   return true
+end
+
+-- Rough reps a day per stat from today's plan (the athlete page's "Lv2 in about a day").
+-- Each block's working time (P.estimate.work of it) goes to its drill shots or gym
+-- exercises evenly; drill reps also feed T.drill.physical, exercises their gains. Warm-up
+-- (jogging) counts when it runs. Stat -> reps (progress units) per day.
+function Career.dailyReps(c)
+  local T, E = Training.data, Progress.estimate
+  local out = {}
+  local function add(k, v) out[k] = (out[k] or 0) + v end
+  for _, b in ipairs(c.schedule) do
+    local sec = (b.stop - b.start) / T.minutesPerSecond * E.work
+    if b.kind == "drill" and b.focus then
+      local reps = sec / E.drillRep
+      for _, shot in ipairs(b.focus) do add(shot, reps / #b.focus) end
+      for stat, g in pairs(T.drill.physical) do add(stat, reps * g) end
+    elseif b.kind == "gym" or b.kind == "warmup" then
+      local list = b.kind == "warmup" and { "jog" } or b.focus or {}
+      for _, ex in ipairs(list) do
+        local X = T.exercises[ex]
+        local reps = sec / #list / X.repTime
+        for stat, g in pairs(X.gains) do add(stat, reps * g) end
+      end
+    end
+  end
+  return out
 end
 
 -- His stat levels as a match sees them.

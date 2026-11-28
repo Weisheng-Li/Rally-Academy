@@ -10,10 +10,12 @@
 --                     whiteboard.
 --   Stats (top right) progress on the stats the running block trains (none in free time);
 --                     the whole picture is on the athlete card.
---   Athlete / Menu    the athlete card overlay / back to the title screen.
--- Click the world to coach him (he speeds up). Keys: 1-4 speed (x1 x3 x10 x30), Space pause,
--- Esc closes an overlay.
+--   Athlete / Menu    the full-screen athlete page (src/view/athlete_view.lua) / back to the title.
+-- Click the world to coach him (he speeds up). Time runs at one fixed pace for everyone (no speed
+-- keys or pause: faster time would just be a shortcut); --speed N is a dev-only flag.
+-- Keys: Esc closes an overlay, left / right arrows look into the next room.
 local Layout = require("src.config.layout")
+local Progress = require("src.data.progress")
 local Camera = require("src.view.camera")
 local Draw = require("src.view.draw")
 local Assets = require("src.view.assets")
@@ -24,12 +26,13 @@ local Tournament = require("src.core.tournament")
 local Athletes = require("src.data.athletes")
 local View = require("src.view.training_view")
 local Lobby = require("src.view.lobby_view")
+local AthleteView = require("src.view.athlete_view")
+local Avatar = require("src.view.avatar")
 
 local TL, HB = Layout.training, Layout.hub
 local C, TC = Layout.colors, Layout.training.colors
 local TD = Training.data
 local CD = Career.data
-local SPEEDS = { 1, 3, 10, 30 }
 local WORKING = 1.05
 local DRAG_START = 3          -- px the mouse must move before a press becomes a drag
 local CAT_COLOR = { court = { 0.16, 0.55, 0.43 }, gym = { 0.88, 0.58, 0.22 } }
@@ -45,10 +48,10 @@ function Hub.new(app, params)
   self.sim = self.career.sim
   self.cam = Camera.new(TL.camera)
   self.view = View.new(self.cam)
-  self.speed = app.dev.speed or 1
-  self.paused = false
+  self.speed = app.dev.speed or 1     -- dev only (--speed N): players can't change the pace
   self.shown, self.flash = {}, {}
   self.tab = 1
+  self.athleteView = AthleteView.new(self.career)      -- full-screen athlete page (Athlete button)
   self.mx, self.my = app.mouse.x, app.mouse.y
   if app.dev.clock and not app.dev.clockUsed then   -- dev: start the day at --clock HH:MM
     app.dev.clockUsed = true
@@ -60,6 +63,8 @@ function Hub.new(app, params)
   self.fade = 0
   self.overlay = nil              -- "drawer" | "athlete"
   if params.open == "drawer" or params.open == "athlete" then self.overlay = params.open end
+  local track = params.open and params.open:match("^athlete:(%a+)$")   -- dev: a stat's level track
+  if track then self.overlay = "athlete"; self.athleteView.pick = track end
   if params.open == "drag" then   -- dev: a card mid-drag over slot 3
     self.overlay = "drawer"
     self.drag = { kind = "program", id = "clear_smash", moved = true }
@@ -193,6 +198,7 @@ local HAND
 function Hub:_updateCursor()
   local mx, my = self.mx, self.my
   local hot = self.hover ~= nil
+  if self.overlay == "athlete" then hot = self.athleteView:hot(mx, my) end
   if not self.overlay and not self.drag then
     for _, d in ipairs(self:_doors()) do hot = hot or inside(d, mx, my) end
     local B = self:_buttons()
@@ -219,11 +225,10 @@ function Hub:update(dt)
   self:_updateCursor()
   self.view.emblemTier = Emblem.tierFor(self.career.level, self.career.champion)
   local every = self.app.dev.coach
-  if every and not self.paused then
+  if every then
     self.coachT = (self.coachT or 0) + dt
     if self.coachT >= every then self.coachT = 0; Training.coach(self.sim) end
   end
-  if self.paused then return end
   local sim = self.sim
   local step = dt * self.speed
   local n = math.max(1, math.ceil(step / 0.05))
@@ -252,7 +257,10 @@ function Hub:_say(text) self.toast = { text = text, t = 2.2 } end
 ---------------------------------------------------------------------------- input
 function Hub:mousepressed(x, y, button)
   if button ~= 1 then return end
-  if self.overlay == "athlete" then self.overlay = nil; return end
+  if self.overlay == "athlete" then
+    if self.athleteView:click(x, y) == "close" then self.overlay = nil end
+    return
+  end
   local B = self:_buttons()
   if self.overlay == "drawer" then
     if inside(self:_closeRect(), x, y) then self.overlay = nil; return end
@@ -325,16 +333,15 @@ function Hub:_enter()
 end
 
 function Hub:keypressed(key)
-  local i = tonumber(key)
-  if i and SPEEDS[i] then self.speed = SPEEDS[i] end
-  if key == "space" then self.paused = not self.paused end
   if (key == "left" or key == "right") and not self.overlay then
     for _, d in ipairs(self:_doors()) do
       if (d.side < 0) == (key == "left") then self:_goRoom(d.room) end
     end
   end
   if key == "escape" then
-    if self.overlay then self.overlay = nil else self.app:switch("title") end
+    if self.overlay == "athlete" then
+      if self.athleteView:escape() == "close" then self.overlay = nil end
+    elseif self.overlay then self.overlay = nil else self.app:switch("title") end
   end
 end
 
@@ -532,7 +539,7 @@ function Hub:_drawStats()
       Draw.color(fl > 0.6 and TC.levelup or C.good, math.min(0.35, fl * 0.5))
       love.graphics.rectangle("fill", S.x + 2, y - 1, S.w - 4, S.rowH)
     end
-    Draw.text(name, S.x + 5, y, C.text, Assets.fonts.small)
+    Draw.text(Progress.name(name), S.x + 5, y, C.text, Assets.fonts.small)
     Draw.text(tostring(sk.level), S.x + 44, y, TC.levelup, Assets.fonts.small, "right", 12)
     local bx, bw = S.x + 60, S.w - 98
     Draw.color(C.textDim, 0.25)
@@ -572,8 +579,7 @@ function Hub:_drawTop()
   Emblem.draw(Emblem.tierFor(c.level, c.champion), x + 13, N.y + 14, 9)
   Draw.text(string.format("%s  -  %s", c.name, c.champion and "World Champion" or Athletes.levels[c.level].title),
     x + 26, N.y + 4, C.text, Assets.fonts.small)
-  Draw.text(Training.clockText(sim.clock), x, N.y + 3, C.text, Assets.fonts.normal, "right", N.w - 30)
-  Draw.text(self.paused and "||" or ("x" .. self.speed), x, N.y + 4, C.textDim, Assets.fonts.small, "right", N.w - 6)
+  Draw.text(Training.clockText(sim.clock), x, N.y + 3, C.text, Assets.fonts.normal, "right", N.w - 6)
   local label = a.label
   if a.repsTarget then
     label = string.format("%s  -  %s %d/%d", a.label, a.unit or "rep", math.min(a.reps + 1, a.repsTarget), a.repsTarget)
@@ -593,8 +599,14 @@ end
 
 function Hub:_drawButtons()
   local B = self:_buttons()
-  smallButton(B.athlete, "Athlete", inside(B.athlete, self.mx, self.my) and not self.overlay)
-  smallButton(B.menu, "Menu", inside(B.menu, self.mx, self.my) and not self.overlay)
+  -- icons: your headshot opens the athlete page, the arrow goes back to the title
+  local a, m = B.athlete, B.menu
+  AthleteView.iconButton(a, inside(a, self.mx, self.my) and not self.overlay, function(col)
+    Avatar.draw({ name = self.career.name, you = true }, a.x + a.w / 2, a.y + a.h / 2, 7, 1, col)
+  end)
+  AthleteView.iconButton(m, inside(m, self.mx, self.my) and not self.overlay, function(col)
+    AthleteView.drawArrow(m.x, m.y, m.w, m.h, col)
+  end)
 end
 
 -- Door tabs at the screen edges: a doorway with the next room's name and an arrow.
@@ -656,61 +668,6 @@ function Hub:_drawLobbyHover()
   Draw.sign("Enter", e.x, e.y, e.w, e.h, ink, Assets.fonts.small)
 end
 
----------------------------------------------------------------------------- drawing: athlete card
-function Hub:_drawAthlete()
-  local A = HB.athlete
-  local c = self.career
-  love.graphics.setColor(0, 0, 0, 0.55)
-  love.graphics.rectangle("fill", 0, 0, Layout.width, Layout.height)
-  Draw.panel(A.x, A.y, A.w, A.h)
-  Draw.text(c.name, A.x + 10, A.y + 8, C.text, Assets.fonts.big)
-  Draw.text(string.format("Day %d   -   OVR %.1f", self.sim.day, Career.rating(c)), A.x + 10, A.y + 32, C.textDim,
-    Assets.fonts.small)
-  -- league ladder, top league first
-  local lx, ly = A.x + 10, A.y + 52
-  Draw.text("LEAGUES", lx, ly, C.textDim, Assets.fonts.small)
-  for i = #Athletes.levels, 1, -1 do
-    local y = ly + 14 + (#Athletes.levels - i) * 34
-    local cur, done = i == c.level, i < c.level or (c.champion and i == c.level)
-    Emblem.draw(i, lx + 14, y + 13, 12, (cur or done) and 1 or 0.35)
-    local col = cur and C.text or (done and C.textDim or { 0.4, 0.42, 0.48 })
-    Draw.text(string.format("Lv%d %s", i, Athletes.levels[i].title), lx + 32, y + 4, col, Assets.fonts.small)
-    Draw.text(string.format("%s - %d", CD.events[i].name, CD.events[i].size), lx + 32, y + 14,
-      cur and HB.accent or { 0.45, 0.47, 0.53 }, Assets.fonts.small)
-  end
-  -- stats vs the next league
-  local sx, sy = A.x + 190, A.y + 52
-  local st, target = Career.stats(c), Career.targetStats(c)
-  Draw.text(c.level < #Athletes.levels and "STATS   (red mark: typical " .. Athletes.levels[c.level + 1].title .. " player)"
-    or "STATS", sx, sy, C.textDim, Assets.fonts.small)
-  local y = sy + 14
-  for _, k in ipairs(Tournament.STAT_KEYS) do
-    local v, tv = st[k], target[k]
-    Draw.text(k, sx, y, C.text, Assets.fonts.small)
-    Draw.text(tostring(v), sx + 60, y, TC.levelup, Assets.fonts.small, "right", 12)
-    local bx, bw = sx + 78, 110
-    Draw.color(C.textDim, 0.25)
-    love.graphics.rectangle("fill", bx, y + 2, bw, 5)
-    Draw.color(C.near)
-    love.graphics.rectangle("fill", bx, y + 2, bw * v / 10, 5)
-    Draw.color(C.far)
-    love.graphics.rectangle("fill", bx + bw * tv / 10 - 1, y, 2, 9)
-    if k == "reach" or k == "recovery" then Draw.text("legs", bx + bw + 4, y, C.textDim, Assets.fonts.small) end
-    if k == "reaction" then Draw.text("league", bx + bw + 4, y, C.textDim, Assets.fonts.small) end
-    y = y + 17
-  end
-  -- history
-  local hx, hy = A.x + 400, A.y + 52
-  Draw.text("TOURNAMENTS", hx, hy, C.textDim, Assets.fonts.small)
-  if #c.history == 0 then Draw.text("None yet", hx, hy + 14, { 0.45, 0.47, 0.53 }, Assets.fonts.small) end
-  for i = #c.history, math.max(1, #c.history - 9), -1 do
-    local h = c.history[i]
-    local y2 = hy + 14 + (#c.history - i) * 24
-    Draw.text(string.format("Day %d  %s", h.day, h.event), hx, y2, C.text, Assets.fonts.small)
-    Draw.text(h.result, hx, y2 + 10, h.won and C.good or C.textDim, Assets.fonts.small)
-  end
-  Draw.text("Click anywhere to close", A.x, A.y + A.h - 14, C.textDim, Assets.fonts.small, "center", A.w)
-end
 
 function Hub:draw()
   local sim = self.sim
@@ -739,10 +696,11 @@ function Hub:draw()
   if self.toast then
     Draw.text(self.toast.text, 0, HB.hintY - 14, HB.accent, Assets.fonts.small, "center", Layout.width)
   end
-  local hint = self.room == "lobby" and "1-4 speed   Space pause"
-    or (self:_here() and "Click to coach   1-4 speed   Space pause   Arrows: next room" or "1-4 speed   Space pause   Arrows: next room")
-  Draw.text(hint, 0, HB.hintY, C.textDim, Assets.fonts.small, "center", Layout.width)
-  if self.overlay == "athlete" then self:_drawAthlete() end
+  -- the one thing you can't see on screen: clicking him coaches him
+  if self:_here() and self.room ~= "lobby" then
+    Draw.text("Click to coach", 0, HB.hintY, C.textDim, Assets.fonts.small, "center", Layout.width)
+  end
+  if self.overlay == "athlete" then self.athleteView:draw(self.mx, self.my) end
 end
 
 return Hub

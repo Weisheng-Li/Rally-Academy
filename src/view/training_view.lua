@@ -3,6 +3,7 @@
 -- moods); this file only decides how it looks: where he stands, his pose, props, shuttles.
 -- Sprites go through src/view/figure.lua (sizes from src/core/body.lua).
 local Layout = require("src.config.layout")
+local Progress = require("src.data.progress")
 local CourtView = require("src.view.court_view")
 local Figure = require("src.view.figure")
 local Draw = require("src.view.draw")
@@ -233,7 +234,7 @@ function View:popup(text, color, big)
 end
 
 local function qualityText(e)
-  local name = e.skill
+  local name = Progress.name(e.skill)
   if e.quality == "perfect" then return string.format("+%g %s  perfect!", e.gain, name), TC.perfect end
   if e.quality == "miss" then
     local why = ({ net = "in the net", long = "long", wide = "wide", short = "short" })[e.outcome] or "miss"
@@ -302,7 +303,7 @@ function View:update(s, dt)
       local text, col = qualityText(e)
       self:popup(text, col)
     elseif e.type == "levelup" then
-      self:popup(string.format("%s  LEVEL %d!", e.skill:upper(), e.level), TC.levelup, true)
+      self:popup(string.format("%s  LEVEL %d!", Progress.name(e.skill):upper(), e.level), TC.levelup, true)
     end
   end
   for i = #self.popups, 1, -1 do

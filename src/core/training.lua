@@ -192,6 +192,27 @@ function Training.drillRep(s, shotName, rng)
   return rep
 end
 
+-- n practice shots of a drill (T.shots[shotName]) for someone with these stats, from the
+-- middle of the drill's hitting area to its aim: real shot model + real hand shake, no
+-- feeder, no tiredness. For the athlete page's landing clouds.
+-- Returns { from, aim, points = { {x, y, outcome} }, inCount, available }.
+function Training.practice(stats, shotName, n, rng)
+  local S = T.shots[shotName]
+  local from = { x = (S.x[1] + S.x[2]) / 2, y = (S.y[1] + S.y[2]) / 2 }
+  local aim = { x = S.aim.x, y = S.aim.y }
+  local ctx = { stats = stats, from = from, h0 = S.h, contact = { state = "ontime" },
+                maxSpeed = Curve.at(Stats.power, stats.power or 5) }
+  local ev = Shots.evaluate(ctx, aim, S.shot)
+  local out = { from = from, aim = aim, points = {}, inCount = 0, available = ev.available, n = n }
+  if not ev.available then return out end
+  for i = 1, n do
+    local res = Shots.execute(ctx, ev, rng)
+    out.points[i] = { x = res.landing.x, y = res.landing.y, outcome = res.outcome }
+    if res.outcome == "in" then out.inCount = out.inCount + 1 end
+  end
+  return out
+end
+
 -- Next rep of the set, starting at a.t0: drills fly a real feed and return; gym reps take repTime.
 local function startRep(s, a, t0)
   a.started = a.started + 1

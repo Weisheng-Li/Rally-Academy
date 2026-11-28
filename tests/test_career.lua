@@ -22,7 +22,7 @@ end
 
 return {
   ["career core never touches love"] = function(t)
-    for _, path in ipairs({ "src/core/career.lua", "src/core/tournament.lua", "src/data/career.lua" }) do
+    for _, path in ipairs({ "src/core/career.lua", "src/core/tournament.lua", "src/data/career.lua", "src/data/progress.lua" }) do
       local f = assert(io.open(path, "r"))
       local src = f:read("*a")
       f:close()

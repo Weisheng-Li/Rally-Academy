@@ -62,8 +62,8 @@ C.movement = { fromLegs = { "reach", "recovery" }, fromLeague = { "reaction" } }
 -- the next league), +- spread levels of noise per stat.
 C.events = {
   { name = "Neighbourhood Cup",     size = 4 },
-  { name = "Club Open",             size = 4 },
-  { name = "City Championship",     size = 8 },
+  { name = "Rec League Cup",        size = 4 },
+  { name = "Club Open",             size = 8 },
   { name = "Regional Championship", size = 8 },
   { name = "National Championship", size = 16 },
   { name = "World Championship",    size = 32 },

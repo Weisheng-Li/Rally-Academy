@@ -222,10 +222,13 @@ return {
     deskCard = { w = 150, h = 46 },                              -- pops up over the lobby's front desk on hover
     doors = { y = 176, w = 18, h = 74 },                         -- door tabs at the screen edges (to the next room)
     fade = 0.25,                                                 -- s of black when the view changes room
-    card = { x = 504, y = 330, w = 64, h = 18 },                 -- Athlete button
-    menu = { x = 572, y = 330, w = 64, h = 18 },                 -- Menu (back to title)
+    card = { x = 590, y = 330, w = 20, h = 20 },                 -- Athlete (your headshot icon)
+    menu = { x = 614, y = 330, w = 20, h = 20 },                 -- back to the title (arrow icon)
     drawer = { x = 150, y = 60, w = 340, h = 122, tabH = 16, cardW = 104, cardH = 32, gap = 6 },
-    athlete = { x = 60, y = 30, w = 520, h = 300 },              -- athlete card overlay
+    -- athlete page (full screen, src/view/athlete_view.lua): stat rows on the left, the picked
+    -- stat's detail on the right
+    athlete = { back = { x = 6, y = 6, w = 18, h = 18 }, headX = 32, headY = 8,
+                split = { x = 8, y = 36, w = 196, rowH = 22, rowGap = 2, paneX = 216 } },
     hintY = 350,
   },
 

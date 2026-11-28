@@ -16,7 +16,7 @@
 --   --coach N                  training demo: click to coach every N seconds (at --mouse or the centre)
 --   --anytime                  --shot fires at SECONDS even mid-rally (no decision needed)
 --   --career N                 skip the title: a new career at league N (1-6), opens on the hub
---   --open NAME                with --career: drawer | athlete | desk | bracket[:N won] | promotion;
+--   --open NAME                with --career: drawer | athlete[:stat] | desk | bracket[:N won] | promotion;
 --                              with --title: naming or naming:Name (the name dialog)
 --   --room NAME                with --career: look into this room first (court | lobby | gym)
 --   --plan A,B,C,D             with --career: start with these programs in slots 1-4 (- = empty)

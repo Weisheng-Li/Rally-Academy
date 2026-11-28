@@ -5,6 +5,7 @@
 -- from ratings (src/core/tournament.lua). When it's over: Continue -> promotion or the hub.
 -- Withdraw (button, or Esc) before your first match: back to the hub, nothing recorded.
 local Layout = require("src.config.layout")
+local Progress = require("src.data.progress")
 local Draw = require("src.view.draw")
 local Assets = require("src.view.assets")
 local Emblem = require("src.view.emblem")
@@ -257,14 +258,13 @@ function Scene:_drawPreview(you, opp)
   local x, y, w = TT.previewX, TT.previewY, TT.previewW
   Draw.panel(x - 6, y - 6, w + 12, TT.previewH + 12)
   local font = Assets.fonts.small
-  -- who: portrait, name and overall level (average stat) for both (bars below: blue you, red them)
+  -- who: portrait and name (no overall number: you learn how good they are by playing them) (bars below: blue you, red them)
   for i, p in ipairs({ you, opp }) do
     local px = i == 1 and x or x + w / 2 + 4
     Avatar.draw(p, px + 7, y + 8, 7, 1, i == 1 and C.near or C.far)
-    Draw.text(p.name, px + 18, y, C.text, font)
-    Draw.text(string.format("OVR %.1f", Tournament.rating(p.stats)), px + 18, y + 10, C.textDim, font)
+    Draw.text(p.name, px + 18, y + 4, C.text, font)
   end
-  y = y + 24
+  y = y + 20
   local barX, unit = x + 70, 12
   for _, g in ipairs(GROUPS) do
     Draw.text(g[1], x, y, C.textDim, font)
@@ -272,7 +272,7 @@ function Scene:_drawPreview(you, opp)
     for _, k in ipairs(g[2]) do
       local v, o = you.stats[k], opp.stats[k]
       local col = v > o + 0.05 and C.good or (v < o - 0.05 and C.bad or C.textDim)
-      Draw.text(k, x + 6, y, C.textDim, font)
+      Draw.text(Progress.name(k), x + 6, y, C.textDim, font)
       Draw.text(string.format("%g", v), x + 44, y, col, font, "right", 22)
       Draw.color(C.near, 0.85)
       love.graphics.rectangle("fill", barX, y + 2, v * unit, 5)
