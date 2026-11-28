@@ -95,6 +95,12 @@ T.habits = {
   music    = { label = "Picking a playlist",   dur = { 4, 6 },   w = 0.5, loc = "gym", rest = true },
   selfie   = { label = "Mirror selfie",        dur = { 4, 6 },   w = 0.3, loc = "gym", rest = true },
   bench    = { label = "Resting on the bench", dur = { 6, 12 },  w = 1.0, loc = "gym", rest = true },
+  -- lobby (free time only: no plan block happens in the lobby)
+  browse   = { label = "Browsing the rackets", dur = { 8, 14 },  w = 1.0, loc = "lobby", rest = true },
+  deskchat = { label = "Chatting at the front desk", dur = { 8, 14 }, w = 0.7, loc = "lobby", rest = true },
+  sofa     = { label = "Sitting in the lobby", dur = { 8, 16 },  w = 0.8, loc = "lobby", rest = true },
+  bathroom = { label = "Bathroom break",       dur = { 12, 18 }, w = 0.35, loc = "lobby", rest = true },
+  stringer = { label = "Watching a racket get strung", dur = { 6, 10 }, w = 0.5, loc = "lobby", rest = true },
   sulk     = { label = "Annoyed with himself", dur = { 4, 6 },   w = 0, rest = true },   -- after misses
   celebrate = { label = "Fist pump!",          dur = { 2, 3 },   w = 0, rest = true },   -- after a perfect streak
 }
@@ -122,8 +128,17 @@ T.sulkAfter = 4
 T.celebrateAfter = 4
 -- Napping through the end of the lunch break: chance, and how long he oversleeps (s).
 T.oversleep = { chance = 0.5, extra = { 4, 10 } }
--- Walking between the court and the gym (s); arriving late in the morning (schedule minutes).
+-- The academy's rooms, left to right: neighbours share a door (the lobby is in the middle).
+-- He walks room to room: T.walk s through one door (half to the door, half into the room),
+-- T.walkOn s when he carries straight on from the last walk (he is already at the next door).
+T.rooms = { "court", "lobby", "gym" }
 T.walk = 6
+T.walkOn = 4
+T.walkAcross = 8      -- s to cross a room he is only passing through (door to door)
+-- Free time (an empty slot in the plan): he does his own thing in the room he is in (that
+-- room's habits) and now and then wanders through a door (weight per neighbouring room).
+T.wander = 0.6
+-- Arriving late in the morning (schedule minutes).
 T.lateMorning = { -2, 8 }
 
 -- Coach clicks: every click the coach shouts a line and adds 1 hype; hype halves every
@@ -160,6 +175,10 @@ T.lines = {
   selfie    = { "Gains", "*click*" },
   snack     = { "Mmm", "Banana time" },
   yesCoach  = { "Yes coach!", "On it!", "Okay!" },
+  deskchat  = { "Morning!", "Any tournaments?", "Busy today?", "Haha", "..." },
+  desk      = { "Morning!", "Sign-ups are open", "Haha", "Good luck!", "..." },
+  browse    = { "Nice racket...", "Too pricey", "Ooh, new shoes" },
+  stringer  = { "How tight?", "Cool machine" },
 }
 
 return T

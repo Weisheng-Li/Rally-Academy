@@ -1,130 +1,177 @@
--- Title / level picker: pick your level (left) and the opponent's (right), stats compared in
--- the middle. Same 6 levels for both (src/data/athletes.lua).
---   mouse: click a level in either column, click Play
---   keys:  Up/Down your level, W/S the opponent's, 1-6 your level, Enter play, D footwork demo, T training demo
+-- Title screen: the academy hall (src/view/hall_view.lua) with the centre court empty and
+-- lit, waiting for a new athlete. Only for starting a career: with a career running the
+-- game opens on the hub, and the hub's Menu button brings you back here.
+--   New career -> name your athlete -> hub.  With a career: Back to academy, or New career
+--   (replaces it, after a second click).
+--   Dev keys: M quick match, D footwork demo, T training demo, Esc quit.
 local Layout = require("src.config.layout")
-local Athletes = require("src.data.athletes")
 local Draw = require("src.view.draw")
 local Assets = require("src.view.assets")
+local Hall = require("src.view.hall_view")
+local Career = require("src.core.career")
 
 local Title = {}
 Title.__index = Title
 
 local C = Layout.colors
-local M = Layout.menu
-local N = #Athletes.levels
-local GROUPS = {
-  { name = "Technique", stats = { "clear", "lift", "drop", "net", "drive", "smash" } },
-  { name = "Physical",  stats = { "power", "speed", "legs", "stamina" } },
-  { name = "Movement",  stats = { "reach", "reaction", "recovery" } },
-}
+local HL = Layout.hall
 
 function Title.new(app, params)
-  local self = setmetatable({ app = app, hover = nil }, Title)
-  self.you = params.you or 3
-  self.opp = params.opp or 3
-  self.rows = {}
-  for i = 1, N do
-    local y = M.listY + (i - 1) * (M.rowH + M.rowGap)
-    self.rows[#self.rows + 1] = { side = "you", level = i, x = M.youX, y = y, w = M.rowW, h = M.rowH }
-    self.rows[#self.rows + 1] = { side = "opp", level = i, x = M.oppX, y = y, w = M.rowW, h = M.rowH }
-  end
-  self.play = { x = M.statsX + M.statsW / 2 - 50, y = M.statsY + M.statsH + 8, w = 100, h = 22 }
+  local self = setmetatable({ app = app }, Title)
+  local seed = app.dev.seed or os.time()
+  local rng = love.math.newRandomGenerator(seed)
+  self.rng = function() return rng:random() end
+  self.hall = Hall.new(self.rng)
+  self.hall:update(0)
+  self.naming = params.naming and "" or nil     -- the name being typed (nil = dialog closed)
+  local dev = app.dev.open and app.dev.open:match("^naming:?(.*)")   -- dev: --open naming[:Name]
+  if dev then self.naming = dev end
   return self
 end
 
-local function inside(b, x, y) return x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h end
+local function inside(x, y, rx, ry, rw, rh) return x >= rx and x <= rx + rw and y >= ry and y <= ry + rh end
 
-function Title:update()
-  local mx, my = self.app.mouse.x, self.app.mouse.y
-  self.hover = nil
-  for _, r in ipairs(self.rows) do if inside(r, mx, my) then self.hover = r end end
-  self.hoverPlay = inside(self.play, mx, my)
+function Title:_backRect()
+  local x, y, w, h = self.hall:buttonRect()
+  return x, y + h + 6, w, h
 end
+
+function Title:update(dt)
+  self.hall:update(dt)
+  local mx, my = self.app.mouse.x, self.app.mouse.y
+  self.hoverNew = not self.naming and inside(mx, my, self.hall:buttonRect())
+  self.hoverBack = not self.naming and self.app.career and inside(mx, my, self:_backRect())
+  if self.naming then
+    local R = self:_namingRects()
+    self.hoverStart = self.naming ~= "" and inside(mx, my, R.start.x, R.start.y, R.start.w, R.start.h)
+    self.hoverCancel = inside(mx, my, R.cancel.x, R.cancel.y, R.cancel.w, R.cancel.h)
+  end
+end
+
+function Title:_newCareer()
+  if self.app.career and not self.confirmReplace then
+    self.confirmReplace = true
+    return
+  end
+  self.naming = ""
+end
+
+-- Name dialog geometry (layout.hall.naming): box, input field, Start and Cancel buttons.
+function Title:_namingRects()
+  local N = HL.naming
+  local x = (Layout.width - N.w) / 2
+  local bx = Layout.width / 2 - N.buttonW - N.buttonGap / 2
+  return {
+    box = { x = x, y = N.y, w = N.w, h = N.h },
+    field = { x = (Layout.width - N.fieldW) / 2, y = N.y + N.fieldY, w = N.fieldW, h = N.fieldH },
+    start = { x = bx, y = N.y + N.buttonY, w = N.buttonW, h = N.buttonH },
+    cancel = { x = bx + N.buttonW + N.buttonGap, y = N.y + N.buttonY, w = N.buttonW, h = N.buttonH },
+  }
+end
+
+function Title:_cancelNaming() self.naming = nil; self.confirmReplace = false end
 
 function Title:_start()
-  self.app:switch("match", { you = self.you, opp = self.opp })
+  local name = self.naming:match("^%s*(.-)%s*$")
+  if name == "" then return end
+  self.app.career = Career.new({ rng = self.rng, name = name })
+  self.app:switch("hub")
 end
 
-function Title:_drawRow(r)
-  local L = Athletes.levels[r.level]
-  local picked = (r.side == "you" and self.you or self.opp) == r.level
-  Draw.panel(r.x, r.y, r.w, r.h)
-  if picked or self.hover == r then
-    Draw.color(r.side == "you" and C.near or C.far, picked and 1 or 0.5)
-    love.graphics.rectangle("line", r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3)
-  end
-  Draw.text(string.format("Lv%d %s", r.level, L.title), r.x + 8, r.y + 5, picked and C.text or C.textDim, Assets.fonts.normal)
-  Draw.text(L.tag, r.x + 8, r.y + 19, C.textDim, Assets.fonts.small)
-end
-
-function Title:_drawStats()
-  local you, opp = Athletes.levels[self.you].stats, Athletes.levels[self.opp].stats
-  local x, y, w = M.statsX, M.statsY, M.statsW
-  Draw.panel(x, y, w, M.statsH)
-  Draw.color(C.near); love.graphics.rectangle("fill", x + 8, y + 9, 6, 6)
-  Draw.text("you", x + 18, y + 6, C.textDim, Assets.fonts.small)
-  Draw.color(C.far); love.graphics.rectangle("fill", x + 50, y + 9, 6, 6)
-  Draw.text("opponent", x + 60, y + 6, C.textDim, Assets.fonts.small)
-  y = y + 20
-  local barX, unit = x + 96, 12
-  for _, g in ipairs(GROUPS) do
-    Draw.text(g.name, x + 8, y, C.text, Assets.fonts.small)
-    y = y + 11
-    for _, stat in ipairs(g.stats) do
-      local v, k = you[stat], opp[stat]
-      local col = v > k and C.good or (v < k and C.bad or C.textDim)
-      Draw.text(stat, x + 16, y, C.textDim, Assets.fonts.small)
-      Draw.text(tostring(v), x + 70, y, col, Assets.fonts.small, "right", 20)
-      Draw.color(C.near, 0.85)
-      love.graphics.rectangle("fill", barX, y + 2, v * unit, 5)
-      Draw.color(C.far)
-      love.graphics.rectangle("fill", barX + k * unit - 1, y, 2, 9)
-      Draw.color(C.textDim, 0.25)
-      love.graphics.rectangle("line", barX + 0.5, y + 1.5, 10 * unit, 6)
-      y = y + 11
-    end
-    y = y + 3
-  end
+local function button(x, y, w, h, label, hot, glow, dim)
+  Draw.color(C.panel)
+  love.graphics.rectangle("fill", x, y, w, h)
+  local col = hot and C.text or HL.colors.post
+  Draw.color(col, glow)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle("line", math.floor(x) + 0.5, math.floor(y) + 0.5, w - 1, h - 1)
+  Draw.text(label, x, y + (h - 10) / 2, dim and C.textDim or (hot and C.text or HL.colors.post), Assets.fonts.normal, "center", w)
 end
 
 function Title:draw()
-  Draw.text("RALLY ACADEMY", 0, M.titleY, C.text, Assets.fonts.title, "center", Layout.width)
-  Draw.text("Pick your level and your opponent's - first to 5", 0, M.subtitleY, C.textDim, Assets.fonts.normal,
-    "center", Layout.width)
-  Draw.text("You", M.youX, M.listY - 14, C.near, Assets.fonts.normal)
-  Draw.text("Opponent", M.oppX, M.listY - 14, C.far, Assets.fonts.normal)
-  for _, r in ipairs(self.rows) do self:_drawRow(r) end
-  self:_drawStats()
+  self.hall:draw()
+  local W = Layout.width
+  Draw.text("RALLY ACADEMY", 0, HL.titleY, C.text, Assets.fonts.title, "center", W)
 
-  local p = self.play
-  Draw.panel(p.x, p.y, p.w, p.h)
-  if self.hoverPlay then Draw.color(C.good); love.graphics.rectangle("line", p.x + 1.5, p.y + 1.5, p.w - 3, p.h - 3) end
-  Draw.text("Play", p.x, p.y + 6, C.text, Assets.fonts.normal, "center", p.w)
-  Draw.text("Up/Down: your level   W/S: opponent   Enter: play   D: footwork demo   T: training demo   Esc: quit",
-    0, M.hintY, C.textDim, Assets.fonts.small, "center", Layout.width)
+  if self.naming then
+    local R = self:_namingRects()
+    local b, f = R.box, R.field
+    local font = Assets.fonts.normal
+    love.graphics.setColor(0, 0, 0, 0.45)
+    love.graphics.rectangle("fill", 0, 0, W, Layout.height)
+    Draw.panel(b.x, b.y, b.w, b.h)
+    Draw.text("NEW ATHLETE", b.x, b.y + 12, C.text, font, "center", b.w)
+    -- input field: placeholder when empty, the blinking caret drawn after the name (so the
+    -- centred name never shifts)
+    Draw.color(HL.colors.wall)
+    love.graphics.rectangle("fill", f.x, f.y, f.w, f.h)
+    Draw.color(HL.colors.post, 0.8)
+    love.graphics.rectangle("line", f.x + 0.5, f.y + 0.5, f.w - 1, f.h - 1)
+    local ty = f.y + (f.h - 10) / 2
+    local placeholder = "Enter a name"
+    local cx
+    if self.naming == "" then
+      Draw.text(placeholder, f.x, ty, C.textDim, font, "center", f.w)
+      cx = f.x + f.w / 2 - font:getWidth(placeholder) / 2 - 3      -- caret before the placeholder
+    else
+      Draw.text(self.naming, f.x, ty, C.text, font, "center", f.w)
+      cx = f.x + f.w / 2 + font:getWidth(self.naming) / 2 + 1
+    end
+    if math.floor(self.hall.time * 2) % 2 == 0 then
+      Draw.color(C.text)
+      love.graphics.rectangle("fill", math.floor(cx), f.y + 3, 1, f.h - 6)
+    end
+    local ok = self.naming ~= ""
+    button(R.start.x, R.start.y, R.start.w, R.start.h, "Start", self.hoverStart, ok and 1 or 0.3, not ok)
+    button(R.cancel.x, R.cancel.y, R.cancel.w, R.cancel.h, "Cancel", self.hoverCancel, 1)
+    return
+  end
+
+  local glow = 0.6 + 0.4 * math.sin(self.hall.time * 2.2)
+  local bx, by, bw, bh = self.hall:buttonRect()
+  local label = self.confirmReplace and "Replace career?" or "New career"
+  button(bx, by, bw, bh, label, self.hoverNew, glow)
+  if self.app.career then
+    local x, y, w, h = self:_backRect()
+    button(x, y, w, h, "Back to academy", self.hoverBack, 1)
+  end
+  if self.confirmReplace then
+    Draw.text("Click again to start over. " .. self.app.career.name .. "'s career will be lost.", 0, by - 14,
+      C.bad, Assets.fonts.small, "center", W)
+  end
+  Draw.text("M quick match   D footwork demo   T training demo   Esc quit", 0, Layout.height - 10, C.textDim,
+    Assets.fonts.small, "right", W - 6)
 end
 
 function Title:mousepressed(x, y, button)
   if button ~= 1 then return end
-  if self.hover then
-    if self.hover.side == "you" then self.you = self.hover.level else self.opp = self.hover.level end
-  elseif self.hoverPlay then
-    self:_start()
+  if self.naming then
+    if self.hoverStart then self:_start() elseif self.hoverCancel then self:_cancelNaming() end
+    return
   end
+  if self.hoverNew then self:_newCareer(); return end
+  if self.hoverBack then self.app:switch("hub"); return end
+  self.confirmReplace = false
+end
+
+function Title:textinput(t)
+  if self.naming and #self.naming < HL.naming.maxLen and t:match("^[%w%s%-']$") then self.naming = self.naming .. t end
 end
 
 function Title:keypressed(key)
-  local i = tonumber(key)
-  if i and Athletes.levels[i] then self.you = i end
-  if key == "up" then self.you = math.max(1, self.you - 1) end
-  if key == "down" then self.you = math.min(N, self.you + 1) end
-  if key == "w" then self.opp = math.max(1, self.opp - 1) end
-  if key == "s" then self.opp = math.min(N, self.opp + 1) end
-  if key == "return" or key == "space" then self:_start() end
+  if self.naming then
+    if key == "backspace" then self.naming = self.naming:sub(1, -2)
+    elseif key == "return" then self:_start()
+    elseif key == "escape" then self:_cancelNaming() end
+    return
+  end
+  if key == "return" then self:_newCareer() end
+  if key == "m" then self.app:switch("quickmatch") end
   if key == "d" then self.app:switch("demo_balance") end
   if key == "t" then self.app:switch("demo_training") end
-  if key == "escape" then love.event.quit() end
+  if key == "escape" then
+    if self.confirmReplace then self.confirmReplace = false else love.event.quit() end
+  end
 end
 
 return Title

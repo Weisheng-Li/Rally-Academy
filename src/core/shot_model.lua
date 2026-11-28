@@ -142,6 +142,25 @@ end
 -- contact/target: world {x, y}; h0: contact height; spec: trajectory spec;
 -- wobble: { angle = rad, dir = rad, speed = fraction } standard deviations.
 -- opts: { method, sampleKind, sampleCount, samples, earlyStop, keepLandings, probeStep }
+-- A shot that comes down before it reaches the net plane (it never got to the net). A wild
+-- mishit that veers past the sideline, or goes away from the net (nS <= 0), is "wide" (out);
+-- one that just drops short inside the court is "net". Only these two: a shot that reaches the
+-- net plane too low is a real net (tape) hit.
+function SM.shortOfNet(cx, wx, nS, land)
+  if not (nS > 0 and nS < math.huge) then return "wide" end
+  if math.abs(cx + wx * land) > Court.HALF_WIDTH_DOUBLES then return "wide" end
+  return "net"
+end
+
+-- Launch speed multiplier for a hand-shake draw s (standard normal): 1 + s * wobble.speed,
+-- kept inside wobble.speedRange { min, max } when the wobble has one.
+function SM.speedFactor(s, wobble)
+  local f = 1 + s * wobble.speed
+  local R = wobble.speedRange
+  if R then f = math.max(R[1], math.min(R[2], f)) end
+  return f
+end
+
 function SM.evaluate(contact, h0, target, spec, wobble, cfg, opts)
   opts = opts or {}
   cfg = cfg or Traj.config
@@ -186,25 +205,36 @@ function SM.evaluate(contact, h0, target, spec, wobble, cfg, opts)
     local wx, wy = ux * c - uy * s, ux * s + uy * c
     local nS = -contact.y / wy
     local exitS, exitKind = exitDistance(contact.x, contact.y, wx, wy, recvSide)
-    local land, time, isNet
+    local land, time, isNet, short
 
     if sur then
-      local u, v = smp.a / sur.step, smp.s / sur.step
+      -- the surrogate is fitted in units of the speed draw: clamp the draw like speedFactor does
+      local sv = smp.s
+      if wobble.speedRange and wobble.speed > 0 then
+        sv = math.max((wobble.speedRange[1] - 1) / wobble.speed, math.min((wobble.speedRange[2] - 1) / wobble.speed, sv))
+      end
+      local u, v = smp.a / sur.step, sv / sur.step
       land = evalQuad(sur.land, u, v)
-      local nh = evalQuad(sur.net, u, v) + sur.slope * (nS - netS)
-      isNet = nh < netHeight or land < nS
+      if not (nS > 0) or land < nS then
+        short = SM.shortOfNet(contact.x, wx, nS, land)
+      else
+        isNet = evalQuad(sur.net, u, v) + sur.slope * (nS - netS) < netHeight
+      end
       time = evalQuad(sur.time, u, v)
     else
       local angle = sol.angle + smp.a * wobble.angle
-      local speed = sol.speed * (1 + smp.s * wobble.speed)
+      local speed = sol.speed * SM.speedFactor(smp.s, wobble)
       local r = Traj.fly(h0, speed * cos(angle), speed * sin(angle), nS,
         earlyStop and { stopAtNet = true, stopBeyond = exitS } or nil, cfg)
-      isNet = r.hitNet
       land = r.beyond and math.huge or r.land
+      if r.hitNet and not r.netH then short = SM.shortOfNet(contact.x, wx, nS, land)
+      else isNet = r.hitNet end
       time = r.time
     end
 
-    if isNet then
+    if short then
+      counts[short] = counts[short] + 1
+    elseif isNet then
       counts.net = counts.net + 1
     elseif land == math.huge then
       counts[exitKind] = counts[exitKind] + 1

@@ -15,6 +15,15 @@
 --   --speed N                  training demo: time speed (1, 3, 10, 30)
 --   --coach N                  training demo: click to coach every N seconds (at --mouse or the centre)
 --   --anytime                  --shot fires at SECONDS even mid-rally (no decision needed)
+--   --career N                 skip the title: a new career at league N (1-6), opens on the hub
+--   --open NAME                with --career: drawer | athlete | desk | bracket[:N won] | promotion;
+--                              with --title: naming or naming:Name (the name dialog)
+--   --room NAME                with --career: look into this room first (court | lobby | gym)
+--   --plan A,B,C,D             with --career: start with these programs in slots 1-4 (- = empty)
+--   --player K                 tournament: the comparison panel shows seed K (as if clicked)
+--   --title                    with --career: show the title screen (career running) instead
+--   --autoplay                 career: tournaments play themselves (AI plays your matches at x3,
+--                              screens move on by themselves); prints each step
 --   --gif SECONDS              record screenshots/shot.gif from SECONDS in, then quit. While a gif
 --                              is set the game runs on a fixed step (one frame per gif frame)
 --   --giflen SECONDS           gif length (default 4)
@@ -38,6 +47,16 @@ function Dev.parse(args)
     elseif a == "--clock" then d.clock = v; i = i + 1
     elseif a == "--speed" then d.speed = tonumber(v); i = i + 1
     elseif a == "--coach" then d.coach = tonumber(v); i = i + 1
+    elseif a == "--career" then d.career = tonumber(v) or 1; i = i + 1
+    elseif a == "--open" then d.open = v; i = i + 1
+    elseif a == "--room" then d.room = v; i = i + 1
+    elseif a == "--player" then d.player = tonumber(v); i = i + 1
+    elseif a == "--plan" then
+      d.plan = {}
+      for id in (v .. ","):gmatch("([^,]*),") do d.plan[#d.plan + 1] = id ~= "" and id ~= "-" and id or false end
+      i = i + 1
+    elseif a == "--title" then d.title = true
+    elseif a == "--autoplay" then d.autoplay = true; d.autoDecisions = math.huge
     elseif a == "--gif" then d.gifAt = tonumber(v); i = i + 1
     elseif a == "--giflen" then d.gifLen = tonumber(v); i = i + 1
     elseif a == "--giffps" then d.gifFps = tonumber(v); i = i + 1

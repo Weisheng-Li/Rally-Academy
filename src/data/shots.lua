@@ -42,6 +42,10 @@ return {
 
   -- Hand shake (1 sigma) for a Lv5 technique, on-time contact.
   baseWobble = { angle = math.rad(1.6), dir = math.rad(2.2), speed = 0.06 },
+  -- However shaky the hand, a shot leaves the racket at this share of its intended speed at
+  -- most / least (a wild mishit is slow or a bit hot, never 20x faster). Without it a
+  -- very shaky shot could launch at hundreds of m/s and break the flight integrator.
+  speedRange = { 0.5, 1.6 },
   -- Technique level of the shot's family (1-10) -> curves (linear between listed levels).
   technique = {
     -- hand shake x baseWobble; set so a typical on-time rally shot (aimed at the standard

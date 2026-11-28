@@ -16,7 +16,14 @@ function App.new(args)
   self.time = 0
   Assets.load()
   self:resize(love.graphics.getDimensions())
-  if self.dev.demo then
+  if self.dev.career then
+    -- dev: skip the title with a fresh career at league N (--open picks an overlay / screen)
+    local rng = love.math.newRandomGenerator(self.dev.seed or os.time())
+    self.career = require("src.core.career").new({ rng = function() return rng:random() end,
+                                                   level = self.dev.career, name = "Alex",
+                                                   plan = self.dev.plan })
+    self:switch(self.dev.title and "title" or "hub", { open = self.dev.open })
+  elseif self.dev.demo then
     self:switch("demo_" .. self.dev.demo)
   elseif self.dev.profile then
     self:switch("match", { you = self.dev.profile, opp = self.dev.opp, seed = self.dev.seed })
@@ -26,10 +33,21 @@ function App.new(args)
   return self
 end
 
+-- A switch asked for while a scene is still being built (e.g. a dev shortcut in its .new)
+-- runs right after that scene is in place.
 function App:switch(name, params)
+  if self.building then self.pending = { name, params }; return end
+  love.mouse.setCursor()              -- a scene's hand cursor doesn't carry over
   local Scene = require("src.scenes." .. name)
-  self.sceneName = name
-  self.scene = Scene.new(self, params or {})
+  self.building = true
+  local scene = Scene.new(self, params or {})
+  self.building = false
+  self.sceneName, self.scene = name, scene
+  if self.pending then
+    local p = self.pending
+    self.pending = nil
+    self:switch(p[1], p[2])
+  end
 end
 
 function App:resize(w, h)
@@ -107,6 +125,15 @@ end
 function App:mousepressed(x, y, button)
   local vx, vy = self:toVirtual(x, y)
   if self.scene.mousepressed then self.scene:mousepressed(vx, vy, button) end
+end
+
+function App:mousereleased(x, y, button)
+  local vx, vy = self:toVirtual(x, y)
+  if self.scene.mousereleased then self.scene:mousereleased(vx, vy, button) end
+end
+
+function App:textinput(t)
+  if self.scene.textinput then self.scene:textinput(t) end
 end
 
 function App:keypressed(key)

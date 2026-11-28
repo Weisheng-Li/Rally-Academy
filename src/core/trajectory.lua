@@ -125,7 +125,7 @@ function T.fly(h0, vx, vz, netS, opts, cfg)
     end
   end
   T.stats.steps = T.stats.steps + steps
-  return { land = s, time = t, apex = apex, netH = netH, timeout = true }
+  return { land = s, time = t, apex = apex, netH = netH, timeout = true, points = pts }
 end
 
 ---------------------------------------------------------------------------- root finding

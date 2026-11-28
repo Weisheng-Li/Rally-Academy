@@ -1,6 +1,6 @@
 # Trajectory + Monte Carlo benchmark
 
-Generated 2026-11-22 01:44. Times are per decision (6 targets).
+Generated 2026-11-27 23:18. Times are per decision (6 targets).
 
 ## Part 1: trajectory solver (solve only)
 
@@ -8,12 +8,12 @@ Accuracy = re-fly each solution with the reference integrator (RK4, dt 1/4000), 
 
 | Config | Solve (ms) | Flights / solve | Landing err (cm) | Net height err (cm) | Apex err (cm) | Flight time err (ms) | Availability mismatches |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A prototype: euler 1/240 + bisection | 34.28 | 302 | 27.2 | 6.7 | 15.2 | 33.8 | 0 |
-| B euler 1/240 + illinois | 5.69 | 47 | 27.3 | 6.7 | 15.2 | 33.8 | 0 |
-| C euler 1/240 + illinois + warm start | 3.85 | 32 | 27.3 | 6.7 | 15.2 | 33.9 | 0 |
-| D rk2 1/120 + illinois + warm start | 2.78 | 31 | 0.5 | 0.1 | 0.3 | 0.9 | 0 |
+| A prototype: euler 1/240 + bisection | 33.71 | 302 | 27.2 | 6.7 | 15.2 | 33.8 | 0 |
+| B euler 1/240 + illinois | 5.62 | 47 | 27.3 | 6.7 | 15.2 | 33.8 | 0 |
+| C euler 1/240 + illinois + warm start | 3.80 | 32 | 27.3 | 6.7 | 15.2 | 33.9 | 0 |
+| D rk2 1/120 + illinois + warm start | 2.82 | 31 | 0.5 | 0.1 | 0.3 | 0.9 | 0 |
 | E rk2 1/60 + illinois + warm start | 1.45 | 30 | 2.8 | 0.3 | 1.4 | 4.0 | 0 |
-| F rk2 1/30 + illinois + warm start | 0.74 | 30 | 13.1 | 1.5 | 6.3 | 18.0 | 0 |
+| F rk2 1/30 + illinois + warm start | 0.75 | 30 | 13.1 | 1.5 | 6.3 | 18.0 | 0 |
 
 ## Part 2: Monte Carlo (solve + probabilities, trajectory config E)
 
@@ -22,12 +22,12 @@ Error = worst absolute difference in any of success / net / long / wide, in perc
 
 | Method | Decision (ms) | Speedup vs M1 | Flights / target | Max err, skilled (pp) | Max err, rookie (pp) | Mean success err (pp) |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 full, random 150 (previous) | 6.98 | 1.0x | 159 | 3.1 | 6.3 | 1.48 |
-| M2 full, halton 150 | 7.03 | 1.0x | 159 | 3.8 | 4.5 | 1.05 |
-| M3 full, halton 64 | 3.90 | 1.8x | 85 | 4.3 | 3.7 | 1.47 |
-| M4 surrogate, halton 64 | 1.81 | 3.9x | 35 | 4.3 | 4.3 | 1.38 |
-| M5 surrogate, halton 256 | 1.96 | 3.6x | 35 | 3.1 | 2.0 | 0.70 |
-| M6 surrogate, halton 1024 | 2.62 | 2.7x | 35 | 2.3 | 1.5 | 0.39 |
+| M1 full, random 150 (previous) | 6.90 | 1.0x | 159 | 3.1 | 6.3 | 1.48 |
+| M2 full, halton 150 | 6.84 | 1.0x | 159 | 3.8 | 4.5 | 1.05 |
+| M3 full, halton 64 | 3.81 | 1.8x | 85 | 4.3 | 3.7 | 1.47 |
+| M4 surrogate, halton 64 | 1.72 | 4.0x | 35 | 4.3 | 4.3 | 1.38 |
+| M5 surrogate, halton 256 | 1.96 | 3.5x | 35 | 3.1 | 2.0 | 0.70 |
+| M6 surrogate, halton 1024 | 2.64 | 2.6x | 35 | 2.3 | 1.5 | 0.39 |
 
 ## Shot outputs (ground truth)
 

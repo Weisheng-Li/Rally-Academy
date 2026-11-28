@@ -85,6 +85,34 @@ return {
       mirror = { x1 = 1.0, x2 = 3.6 }, selfie = { x = 2.3, y = -0.9 }, speaker = { x = -3.2 },
       idle = { x = 0.3, y = 2.4 }, entry = { x = -5.6, y = 3.2 }, coach = { x = -1.3, y = 1.5 },
     },
+    -- the lobby (between the court and the gym): front desk, pro shop, WC, the plan whiteboard.
+    -- entry = the street door (he walks in from below the screen).
+    lobby = {
+      wallY = -1.8, idle = { x = 0.6, y = 2.6 }, entry = { x = 0.6, y = 8.4 },
+      desk = { x = 1.95, y = -0.3, hx = 1.0, hy = 0.35, h = 1.05 }, receptionist = { x = 1.95, y = -1.05 },
+      deskFront = { x = 1.7, y = 0.6 }, deskSign = { x1 = 0.9, x2 = 3.0 },
+      board = { x1 = -1.7, x2 = 0.3, z1 = 1.0, z2 = 2.1 },              -- whiteboard on the back wall
+      wcDoor = { x1 = -3.0, x2 = -2.1, h = 2.1 }, wc = { x = -2.55, y = -1.25 },
+      shopWall = { x1 = -9, x2 = -3.3 },                                -- slatwall with rackets + shoes
+      cabinet = { x = -5.2, y = -1.3, hx = 1.2, hy = 0.32, h = 0.85 }, browse = { x = -4.8, y = -0.45 },
+      stringer = { x = -2.4, y = 1.3 }, stringerWatch = { x = -1.7, y = 1.7 },
+      sofa = { x = -3.2, y = 3.6 }, sofaSit = { x = -3.24, y = 3.6 }, water = { x = 4.7, y = -1.1 }, fountain = { x = 5.3, y = -1.45 },
+      plant = { x = 3.4, y = -1.35 }, mat = { x = 0.6, y = 6.3 },
+    },
+    -- doors between rooms: doors[room][neighbour] = where that door is in `room` (m, off-screen
+    -- at the side, so he walks out of the picture toward the next room)
+    doors = {
+      court = { lobby = { x = 5.8, y = 4.2 } },
+      lobby = { court = { x = -6.6, y = 3.0 }, gym = { x = 6.6, y = 3.0 } },
+      gym = { lobby = { x = -5.6, y = 3.2 } },
+    },
+    roomNames = { court = "Court", lobby = "Lobby", gym = "Gym" },
+    lobbyLook = {
+      plank = 0.4, plankLen = 2.0, wallTop = 2.9,
+      rackets = { -8.2, -7.6, -7.0, -6.4, -5.8, -5.2, -4.6, -4.0 },     -- x of the rackets on the slatwall
+      shopSign = { x1 = -7.2, x2 = -4.6 }, shoes = { -8.8, -8.25, -7.7 },
+      sofa = { hx = 0.28, hy = 0.75, seat = 0.42, back = 0.85, backT = 0.14, arm = 0.6, armT = 0.14 },   -- half sizes (long along y), heights, thicknesses
+    },
     -- gym decoration (metres): plank width/length, wall panel width, trim height, windows,
     -- poster, red rug, chequered tiles (skipping spot), plant, gym ball, loose weights
     -- courtside bench (m): seat half sizes (long along y), seat height + thickness, legs at
@@ -126,8 +154,89 @@ return {
       perfect = { 1.0, 0.85, 0.30 }, levelup = { 1.0, 0.80, 0.20 },
       coach = { 1.0, 0.72, 0.30 }, sweat = { 0.70, 0.88, 1.0 },
       coachShirt = { 0.85, 0.28, 0.25 }, coachCap = { 0.15, 0.18, 0.30 },   -- coach (= the feeder on court)
+      -- lobby: light wood floor, white walls, warm wood furniture, green shop sign
+      lobbyFloor = { 0.84, 0.72, 0.55 }, lobbyFloorLight = { 0.88, 0.77, 0.60 }, lobbyFloorLine = { 0.72, 0.60, 0.44 },
+      lobbyWall = { 0.93, 0.92, 0.89 }, slat = { 0.86, 0.86, 0.84 }, slatLine = { 0.74, 0.74, 0.72 },
+      cabinet = { 0.82, 0.52, 0.24 }, cabinetTop = { 0.90, 0.62, 0.32 }, cabinetLine = { 0.62, 0.36, 0.14 },
+      desk = { 0.32, 0.34, 0.40 }, deskTop = { 0.86, 0.80, 0.70 }, deskPanel = { 0.20, 0.55, 0.45 },
+      shopSign = { 0.16, 0.55, 0.43 }, door = { 0.97, 0.97, 0.96 }, doorFrame = { 0.80, 0.80, 0.78 },
+      board = { 0.98, 0.98, 0.98 }, boardFrame = { 0.62, 0.64, 0.70 },
+      stringer = { 0.62, 0.10, 0.12 }, sofa = { 0.25, 0.30, 0.42 }, sofaTop = { 0.32, 0.38, 0.52 }, sofaSeat = { 0.38, 0.45, 0.60 },
+      entryMat = { 0.30, 0.30, 0.33 }, receptionShirt = { 0.20, 0.55, 0.45 },
+      racketFrames = { { 0.90, 0.20, 0.25 }, { 0.20, 0.45, 0.90 }, { 0.15, 0.15, 0.18 }, { 0.95, 0.75, 0.15 },
+                       { 0.30, 0.70, 0.40 }, { 0.85, 0.85, 0.88 }, { 0.60, 0.30, 0.80 }, { 0.95, 0.45, 0.15 } },
+      shoes = { { 0.90, 0.25, 0.25 }, { 0.25, 0.55, 0.90 }, { 0.95, 0.95, 0.95 }, { 0.30, 0.75, 0.45 } },
+      bags = { { 0.85, 0.15, 0.20 }, { 0.15, 0.20, 0.35 }, { 0.20, 0.45, 0.85 } },
     },
   },
+
+  -- League emblems (src/view/emblem.lua): frame / gem colour per tier (1-6 leagues, 7 = World Champion).
+  emblems = {
+    hole = { 0.08, 0.10, 0.16 },
+    tiers = {
+      { name = "Bronze",   frame = { 0.73, 0.49, 0.27 } },
+      { name = "Silver",   frame = { 0.73, 0.75, 0.79 } },
+      { name = "Gold",     frame = { 0.96, 0.71, 0.20 } },
+      { name = "Platinum", frame = { 0.80, 0.85, 0.92 } },
+      { name = "Emerald",  frame = { 0.37, 0.79, 0.56 } },
+      { name = "Diamond",  frame = { 0.50, 0.70, 0.95 } },
+      { name = "World Champion", frame = { 0.96, 0.71, 0.20 }, gem = { 0.61, 0.78, 1.00 } },
+    },
+  },
+
+  -- Title screen hall (src/view/hall_view.lua): the match camera on an empty centre court,
+  -- busy courts around it. Courts are offset in metres from the centre court.
+  hall = {
+    -- like the match camera, tilted up a little so the back row, wall and lights show
+    camera = { centerX = 320, nearY = 330, farY = 146, nearWidth = 420, farWidth = 206, heightScale = 0.45 },
+    gap = 2.0,                 -- m between neighbouring courts (side by side)
+    backGap = 3.0,             -- m between the front row and the back row
+    sideCourts = { -1, 1 },    -- front row neighbours (in court widths + gaps)
+    backCourts = { -2, -1, 0, 1, 2 },
+    wallBehind = 2.5,          -- m behind the back row's far baseline
+    ceilingY = 26,             -- screen y where the back wall meets the ceiling
+    lights = { rows = 4, perRow = 7 },
+    woodStrip = 0.9,           -- m of wood floor in front of the near baseline
+    walkers = 6, walkSpeed = { 0.9, 1.3 },
+    titleY = 30, buttonW = 120, buttonH = 22, buttonDepth = 3.8,   -- New career sits this far (m) into the near half
+    -- name dialog (New career): box, input field, Start / Cancel buttons
+    naming = { w = 240, h = 104, y = 128, fieldW = 180, fieldH = 18, fieldY = 34, buttonW = 70, buttonH = 18,
+               buttonY = 70, buttonGap = 16, maxLen = 12 },
+    colors = {
+      floor = { 0.12, 0.52, 0.42 }, court = { 0.10, 0.58, 0.47 }, lines = { 0.92, 0.95, 0.92 },
+      wall = { 0.09, 0.10, 0.12 }, wallTrim = { 0.13, 0.14, 0.17 }, ceiling = { 0.06, 0.07, 0.09 },
+      light = { 0.95, 0.97, 1.00 }, glow = { 0.85, 0.92, 1.00 },
+      post = { 0.95, 0.78, 0.15 }, wood = { 0.78, 0.64, 0.46 }, woodLine = { 0.70, 0.56, 0.39 },
+      spot = { 1.00, 0.95, 0.80 },
+      shirts = { { 0.30, 0.65, 1.00 }, { 1.00, 0.45, 0.35 }, { 0.36, 0.73, 0.54 }, { 0.61, 0.42, 0.84 },
+                 { 0.88, 0.64, 0.23 }, { 0.91, 0.44, 0.56 }, { 0.82, 0.84, 0.88 }, { 0.20, 0.22, 0.28 } },
+    },
+  },
+
+  -- Career hub (src/scenes/hub.lua): the training view plus the career panels.
+  hub = {
+    accent = { 0.95, 0.78, 0.15 },                               -- drag targets, Enter, hover
+    plan = { x = 4, y = 4, w = 140, rowH = 13, slotH = 16, snap = 0.5 },   -- today's plan, top left; snap: share of the dragged chip that must cover a slot
+    stats = { x = 504, y = 4, w = 132, rowH = 11 },              -- stat levels + rep bars, top right
+    top = { y = 4, w = 220 },                                    -- league, day, clock, activity
+    deskCard = { w = 150, h = 46 },                              -- pops up over the lobby's front desk on hover
+    doors = { y = 176, w = 18, h = 74 },                         -- door tabs at the screen edges (to the next room)
+    fade = 0.25,                                                 -- s of black when the view changes room
+    card = { x = 504, y = 330, w = 64, h = 18 },                 -- Athlete button
+    menu = { x = 572, y = 330, w = 64, h = 18 },                 -- Menu (back to title)
+    drawer = { x = 150, y = 60, w = 340, h = 122, tabH = 16, cardW = 104, cardH = 32, gap = 6 },
+    athlete = { x = 60, y = 30, w = 520, h = 300 },              -- athlete card overlay
+    hintY = 350,
+  },
+
+  -- Tournament screens (src/scenes/tournament.lua, src/scenes/promotion.lua).
+  tournament = {
+    headerY = 10, bracketX = 16, bracketY = 64, bracketW = 380, bracketH = 260,
+    centerW = 64, headColW = 24, minPillW = 70, maxPillW = 112, maxPillH = 24, maxRowH = 56,   -- bracket: final column, later-round columns, round-1 pills, row spacing cap
+    previewX = 412, previewY = 64, previewW = 212, previewH = 200,
+    buttonY = 300, buttonW = 120, buttonH = 22, withdrawW = 70, withdrawH = 14,   -- Withdraw: under Play, before the first match
+  },
+  promotion = { emblemY = 150, emblemR = 52, textY = 236 },
 
   colors = {
     bg         = { 0.10, 0.12, 0.16 },

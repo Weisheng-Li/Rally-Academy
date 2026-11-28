@@ -208,6 +208,8 @@ function Rally:commit(index, spot)
 
   if res.outcome == "net" then
     endTime = (#res.path - 1) * res.dt
+  elseif res.ownSide then
+    -- a wild mishit that came down on the hitter's own side: nobody chases it
   elseif res.outcome ~= "in" then
     local a = recv:arrival(landing, res.time, Shots.data.earlySlack)
     recv:moveTo(a.bodyDest, a.delay)

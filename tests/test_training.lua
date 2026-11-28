@@ -237,4 +237,22 @@ return {
       end
     end
   end,
+
+  ["rooms: the lobby sits between the court and the gym"] = function(t)
+    t:ok(Training.nextRoom("court", "gym") == "lobby" and Training.nextRoom("gym", "court") == "lobby", "via the lobby")
+    t:ok(Training.nextRoom("lobby", "gym") == "gym" and Training.nextRoom("court", "lobby") == "lobby", "next door")
+    local n = Training.neighbours("lobby")
+    t:ok(#n == 2 and #Training.neighbours("court") == 1 and #Training.neighbours("gym") == 1, "doors")
+  end,
+
+  ["court to gym: he walks through the lobby, never jumps a room"] = function(t)
+    local seen, last, jumps = {}, nil, 0
+    run(7, 1040, function(s)
+      seen[s.location] = true
+      if last and last ~= s.location and Training.nextRoom(last, s.location) ~= s.location then jumps = jumps + 1 end
+      last = s.location
+    end)
+    t:ok(seen.lobby, "passes through the lobby")
+    t:ok(jumps == 0, "only moves to a neighbouring room, jumps: " .. jumps)
+  end,
 }

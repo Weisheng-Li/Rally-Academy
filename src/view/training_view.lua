@@ -12,10 +12,11 @@ local Court = require("src.core.court")
 local Animator = require("src.view.animator")
 local Anim = require("src.config.animation")
 local Training = require("src.core.training")
+local Lobby = require("src.view.lobby_view")
 
 local TL = Layout.training
 local C, TC = Layout.colors, Layout.training.colors
-local CS, GS = TL.court, TL.gym
+local CS, GS, LS = TL.court, TL.gym, TL.lobby
 local STAND = Body.HIP_HEIGHT
 local TD = Training.data
 -- the feeder stands so his racket head (screen left of him) is at the feed point
@@ -51,6 +52,8 @@ local function walkPose(s)
          WALK.lift * math.max(0, math.cos(ph)), WALK.lift * math.max(0, -math.cos(ph))
 end
 
+View.walkPose = walkPose   -- the title hall's walkers use the same gait
+
 local function standing(cog, dir)
   return { cog = cog, dir = dir or FACE_NET, hipH = STAND, front = Anim.stand.front, back = Anim.stand.back, lean = 0 }
 end
@@ -79,7 +82,12 @@ function View:reset()
 end
 
 ---------------------------------------------------------------------------- spots
-local function locSpots(loc) return loc == "gym" and GS or CS end
+local function locSpots(loc) return loc == "gym" and GS or (loc == "lobby" and LS or CS) end
+-- the door in `room` that leads to `other` (layout.training.doors)
+local function door(room, other) return TL.doors[room][other] end
+View.door = door
+-- where he heads once inside a room
+local function idleSpot(loc) return loc == "gym" and GS.idle or (loc == "lobby" and LS.idle or CS.base) end
 
 -- Where the current activity happens (nil = wherever he is).
 function View:anchor(s)
@@ -94,10 +102,17 @@ function View:anchor(s)
     if a.name == "jog" then return { x = CS.jog.x1, y = CS.jog.y2 }, SIDE_R end
   end
   if a.kind == "walk" then return nil end
-  if a.kind == "arrive" then return S == GS and GS.idle or CS.base, FACE_NET end
+  if a.kind == "arrive" then return idleSpot(s.location), FACE_NET end
   if a.kind == "home" then return S.entry, nil end
   local n = a.name
-  if n == "water" then return S.water, s.location == "gym" and SIDE_L or SIDE_R end
+  if n == "water" then return S.water, s.location == "court" and SIDE_R or (s.location == "lobby" and FACE_NET or SIDE_L) end
+  if s.location == "lobby" then
+    if n == "browse" then return LS.browse, FACE_NET end
+    if n == "deskchat" then return LS.deskFront, FACE_NET end
+    if n == "bathroom" then return LS.wc, FACE_NET end
+    if n == "stringer" then return LS.stringerWatch, SIDE_L end
+    if n == "sofa" or n == "phone" then return LS.sofaSit, SIDE_R end
+  end
   if n == "chat" then return CS.chat, FACE_NET end
   if n == "juggle" then return CS.juggle, FACE_NET end
   if n == "selfie" then return GS.selfie, FACE_NET end
@@ -297,12 +312,13 @@ function View:update(s, dt)
   end
 
   local a = s.activity
-  if self.loc ~= s.location then            -- arrived in the other room: come in from its door
+  if self.loc ~= s.location then            -- arrived in another room: come in from its door
     local first = self.loc == nil
+    local from = a.kind == "walk" and a.from
     self.loc = s.location
-    self.pos = copy(locSpots(s.location).entry)
+    self.pos = copy(from and door(s.location, from) or locSpots(s.location).entry)
     -- jumped straight into the day (--clock): start in the room, not at the door
-    if first and a.kind ~= "arrive" then self.pos = copy(s.location == "gym" and GS.idle or CS.base) end
+    if first and a.kind ~= "arrive" and not from then self.pos = copy(idleSpot(s.location)) end
   end
   if a ~= self.act then
     self.act, self.arrived, self.actT0 = a, false, a.t
@@ -313,8 +329,14 @@ function View:update(s, dt)
   self.pose = nil
   local speed = TL.walkSpeed
   if a.kind == "walk" then
-    local goal = a.switched and (s.location == "gym" and GS.idle or CS.base) or locSpots(a.from).entry
-    local left = (a.switched and a.dur or a.dur / 2) - a.t
+    -- out through the door to the next room; inside, on to the room's middle, or straight
+    -- across to the next door when he is only passing through
+    local goal
+    if not a.switched then goal = door(a.from, a.to)
+    elseif a.final and a.final ~= a.to then goal = door(a.to, Training.nextRoom(a.to, a.final))
+    else goal = idleSpot(a.to) end
+    local switchAt = a.switchAt or a.dur / 2
+    local left = (a.switched and a.dur or switchAt) - a.t
     speed = math.max(speed, dist(self.pos, goal) / math.max(0.2, left))
     self.walking = self:walkTo(goal, dt, speed)
   elseif a.kind == "drill" and a.t >= a.lead and a.cur then
@@ -500,7 +522,7 @@ function View:playerPose(s)
   elseif n == "phone" or (n == "music" and a.dur < 10) then
     P.racket = false
     P.arms = { { angle = math.rad(-15), reach = 0.55, prop = "phone" } }
-    if s.location == "gym" and n == "phone" then self:sit(P) end
+    if s.location ~= "court" and n == "phone" then self:sit(P) end
   elseif n == "yawn" then
     P.racket = false
   elseif n == "selfie" then
@@ -508,8 +530,19 @@ function View:playerPose(s)
     P.arms = { { angle = math.rad(70), reach = 0.95, prop = "phone" } }
     P.flash = (lt % 2.5) < 0.12 and lt > 1
     st.lean = 0
-  elseif n == "bench" then
+  elseif n == "bench" or n == "sofa" then
     self:sit(P)
+  elseif n == "browse" then
+    -- took a racket off the wall: turns it over, looks at the strings
+    P.racket = true
+    P.racketAngle = math.rad(55 + 30 * math.sin(lt * 1.3))
+  elseif n == "deskchat" then
+    P.lift = 0.01 * math.sin(t * 3)
+  elseif n == "stringer" then
+    st.lean = 0.12
+  elseif n == "bathroom" then
+    -- in the WC: out of sight between going in and coming out
+    P.hidden = lt > 0.4 and a.t < a.dur - 0.8
   elseif n == "snack" then
     self:sit(P)
     local bite = (lt % 3) < 1.1
@@ -1103,16 +1136,22 @@ function View:drawGymRoom(s, items)
   end }
 end
 
-function View:draw(s)
+-- room: which room to show (default: the one he is in). He is drawn only in his own room;
+-- the others carry on without him (the feeder waits, the receptionist works).
+function View:draw(s, room)
   local cam = self.cam
   local items = {}
-  if s.location == "gym" then self:drawGymRoom(s, items) else self:drawCourtRoom(s, items) end
+  room = room or s.location
+  local here = s.location == room
+  if room == "gym" then self:drawGymRoom(s, items)
+  elseif room == "lobby" then Lobby.draw(self, s, items, here)
+  else self:drawCourtRoom(s, items) end
 
   -- athlete
-  local P = self:playerPose(s)
+  local P = here and self:playerPose(s) or { hidden = true }
   P.headphones = s.music
   local head
-  items[#items + 1] = { y = self.pos.y + 0.001, draw = function()
+  if not P.hidden then items[#items + 1] = { y = self.pos.y + 0.001, draw = function()
     if P.lying then
       local g = self:drawLying(self.pos, C.near)
       head = { x = g.head.x, y = g.head.y - g.head.r }
@@ -1145,9 +1184,9 @@ function View:draw(s)
         love.graphics.line(nx + 1.5, ny, nx + 1.5, ny - 5)
       end
     end
-  end }
-  -- feeder (court only)
-  if s.location == "court" then
+  end } end
+  -- feeder (court only; he waits there while the athlete is elsewhere)
+  if room == "court" then
     local F = self.feeder
     items[#items + 1] = { y = F.pos.y, draw = function()
       local st
@@ -1177,27 +1216,27 @@ function View:draw(s)
       local f = Figure.stance(cam, st, -1)
       -- the feeder is the coach: his cap and jacket, and he shouts the coaching lines
       self:drawBody(f, self:coachHop(s), TC.coachShirt, { cap = TC.coachCap })
-      local talk = s.coachLine or s.feederBubble
+      local talk = here and (s.coachLine or s.feederBubble)
       if talk then bubble(talk.text, f.head.x, f.head.y - f.head.r - 2 - self:coachHop(s) * f.k, talk.t * 3) end
     end }
   end
   -- gym: the coach stands by and watches him (facing him), shouting when you click
-  if s.location == "gym" then
+  if room == "gym" then
     local cp = GS.coach
     items[#items + 1] = { y = cp.y, draw = function()
-      local dir = norm(self.pos.x - cp.x, self.pos.y - cp.y) or FACE_NET
+      local dir = here and norm(self.pos.x - cp.x, self.pos.y - cp.y) or FACE_NET
       local st = standing(cp, dir)
       st.lean = 0.04 * math.sin(self.time * 0.8)                  -- shifts his weight a little
       local f = Figure.stance(cam, st, 1)
       self:drawBody(f, self:coachHop(s), TC.coachShirt,
         { cap = TC.coachCap, racket = false, arms = { { angle = math.rad(-30), reach = 0.6, prop = "clipboard" } } })
-      if s.coachLine then
+      if here and s.coachLine then
         bubble(s.coachLine.text, f.head.x, f.head.y - f.head.r - 2 - self:coachHop(s) * f.k, s.coachLine.t * 3)
       end
     end }
   end
   -- shuttles flicked toward the basket
-  if s.location == "court" then
+  if room == "court" then
     local B = CS.basket
     for _, fl in ipairs(self.flying) do
       local u = fl.t / FLICK.flight
@@ -1206,7 +1245,7 @@ function View:draw(s)
     end
   end
   -- drill shuttle
-  local sh = self.pose and self.pose.shuttle
+  local sh = here and self.pose and self.pose.shuttle
   if sh then
     CourtView.drawShuttleShadow(cam, sh)
     items[#items + 1] = { y = sh.pos.y + 0.01, draw = function() CourtView.drawShuttle(cam, sh) end }
@@ -1229,5 +1268,8 @@ function View:draw(s)
     if s.bubble then bubble(s.bubble.text, head.x, head.y - 2, s.bubble.t * 3) end
   end
 end
+
+-- drawing helpers the lobby (src/view/lobby_view.lua) shares
+View.box, View.floorRect, View.shade, View.bubble, View.standing = box, floorRect, shade, bubble, standing
 
 return View

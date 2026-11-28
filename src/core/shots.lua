@@ -125,7 +125,7 @@ function Shots.evaluate(ctx, target, shotId)
     spec = { kind = "net", clearance = spec.clearance * tq("tightness", lvl) }
   end
   local bw = Data.baseWobble
-  local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul }
+  local wobble = { angle = bw.angle * mul, dir = bw.dir * mul, speed = bw.speed * mul, speedRange = Data.speedRange }
 
   local base = { shotId = shotId, def = def, name = name, cross = cross, factors = factors,
                  wobble = wobble, wobbleMul = mul, distance = dist }
@@ -194,7 +194,7 @@ end
 function Shots.execute(ctx, ev, rng)
   local sol, w = ev.solution, ev.wobble
   local angle = sol.angle + normal(rng) * w.angle
-  local speed = sol.speed * (1 + normal(rng) * w.speed)
+  local speed = sol.speed * SM.speedFactor(normal(rng), w)
   local phi = normal(rng) * w.dir
   local c, s = math.cos(phi), math.sin(phi)
   local wx, wy = ev.dir.x * c - ev.dir.y * s, ev.dir.x * s + ev.dir.y * c
@@ -205,9 +205,11 @@ function Shots.execute(ctx, ev, rng)
   local path = Shots.worldPath(from, wx, wy, r.points)
   local res = { path = path, dt = Traj.config.dt, time = r.time }
   if r.hitNet then
-    res.outcome = "net"
     local last = path[#path]
     res.landing = { x = last.x, y = last.y }
+    -- it came down before reaching the net: a wild mishit off to the side is out, not net
+    res.outcome = r.netH and "net" or SM.shortOfNet(from.x, wx, netS, r.land)
+    res.ownSide = not r.netH        -- landed on the hitter's side of the net
     return res
   end
   res.landing = { x = from.x + wx * r.land, y = from.y + wy * r.land }

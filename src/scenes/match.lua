@@ -13,16 +13,21 @@ local Animator = require("src.view.animator")
 local MatchScene = {}
 MatchScene.__index = MatchScene
 
+-- params: you / opp (levels, quick match) or near / far (athlete defs, career), seed,
+-- points / cap (score to win), onDone(won, score) (career: called when you leave the
+-- finished match; Esc mid-match retires = a loss). Without onDone, back to the quick match.
 function MatchScene.new(app, params)
   local self = setmetatable({}, MatchScene)
   self.app = app
   self.you, self.opp = params.you or 3, params.opp or 3   -- levels (src/data/athletes.lua)
+  self.onDone = params.onDone
   local rng = love.math.newRandomGenerator(params.seed or os.time())
   local human = { near = true }
   if app.dev.autoDecisions then human = {} end   -- AI plays for you until N decisions have passed
   self.match = Match.new({
-    near = Athletes.level(self.you, "You"), far = Athletes.level(self.opp),
+    near = params.near or Athletes.level(self.you, "You"), far = params.far or Athletes.level(self.opp),
     human = human, rng = function() return rng:random() end, server = app.dev.server,
+    pointsToWin = params.points, cap = params.cap,
   })
   self.decisionsSeen = 0
   self.cam = Camera.new(Layout.camera)
@@ -36,6 +41,17 @@ end
 function MatchScene:update(dt)
   local m = self.match
   local dev = self.app.dev
+  if self.retireAsk then return end
+  if dev.autoplay and self.onDone then                -- dev: career matches play themselves
+    self.timeScale = 3
+    if m.over then
+      self.overT = (self.overT or 0) + dt
+      if self.overT > 1 then
+        print(string.format("[autoplay] match over %d-%d", m.score.near, m.score.far))
+        self:_leave(m.winner == "near"); return
+      end
+    end
+  end
   if not m.over then m:update(dt * self.timeScale) end
   for key, anim in pairs(self.anims) do anim:update(m.players[key], dt * self.timeScale, self.cam) end
   local events = m:drainEvents()
@@ -95,23 +111,45 @@ function MatchScene:draw()
       Assets.fonts.big, "center", 300)
     Draw.text(string.format("%d - %d", m.score.near, m.score.far), 170, 172, Layout.colors.text,
       Assets.fonts.normal, "center", 300)
-    Draw.text("Click or press Enter for the menu", 170, 194, Layout.colors.textDim, Assets.fonts.normal, "center", 300)
+    Draw.text(self.onDone and "Click or press Enter to continue" or "Click or press Enter for the menu", 170, 194,
+      Layout.colors.textDim, Assets.fonts.normal, "center", 300)
+  elseif self.retireAsk then
+    Draw.panel(190, 150, 260, 40)
+    Draw.text("Retire from this match?", 190, 156, Layout.colors.text, Assets.fonts.normal, "center", 260)
+    Draw.text("Esc again: retire (counts as a loss)   any other key: play on", 190, 172, Layout.colors.textDim,
+      Assets.fonts.small, "center", 260)
+  end
+end
+
+-- Leave the match: career -> onDone(won, score); quick match -> back to the level picker.
+function MatchScene:_leave(won)
+  local m = self.match
+  if self.onDone then
+    self.onDone(won, string.format("%d-%d", m.score.near, m.score.far))
+  else
+    self.app:switch("quickmatch", { you = self.you, opp = self.opp })
   end
 end
 
 function MatchScene:mousepressed(x, y, button)
-  if self.match.over then self.app:switch("title"); return end
+  if self.match.over then self:_leave(self.match.winner == "near"); return end
   if self.match.rally:isHumanDecision() then self.ui:mousepressed(self.match.rally, x, y, button) end
 end
 
 function MatchScene:keypressed(key)
   if self.match.over and (key == "return" or key == "space") then
-    self.app:switch("title", { you = self.you, opp = self.opp }); return
+    self:_leave(self.match.winner == "near"); return
+  end
+  if self.retireAsk then
+    self.retireAsk = false
+    if key == "escape" then self:_leave(false) end
+    return
   end
   if key == "[" then self.timeScale = math.max(0.25, self.timeScale - 0.25) end
   if key == "]" then self.timeScale = math.min(3, self.timeScale + 0.25) end
   if key == "escape" and not (self.match.rally:isHumanDecision() and self.ui.mode == "recovery") then
-    self.app:switch("title", { you = self.you, opp = self.opp }); return
+    if self.onDone then self.retireAsk = true else self:_leave(false) end
+    return
   end
   if self.match.rally:isHumanDecision() then self.ui:keypressed(self.match.rally, key) end
 end

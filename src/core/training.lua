@@ -5,7 +5,7 @@
 -- Pure Lua (no love.*): randomness comes in through opts.rng (returns [0, 1)).
 --
 -- State the view reads:
---   s.clock (schedule minutes since midnight), s.day, s.location ("court" | "gym")
+--   s.clock (schedule minutes since midnight), s.day, s.location ("court" | "lobby" | "gym")
 --   s.activity  current activity: kind ("drill" | "exercise" | "habit" | "walk" | "arrive" |
 --               "home"), name, label, t / dur (s), and for rep activities lead, reps / repsTarget,
 --               cur (this rep: i, t0 / contactT / endT (activity seconds), and for drills the
@@ -48,8 +48,34 @@ for i, b in ipairs(T.schedule) do
 end
 Training.schedule = SCHEDULE
 
+-- Schedule blocks from { start = "HH:MM", stop = "HH:MM", kind, loc, label, focus } defs.
+function Training.buildSchedule(defs)
+  local out = {}
+  for i, b in ipairs(defs) do
+    out[i] = { i = i, start = Training.minutes(b.start), stop = Training.minutes(b.stop), kind = b.kind,
+               loc = b.loc, label = b.label, focus = b.focus }
+  end
+  return out
+end
+
+-- Rooms (T.rooms, left to right; neighbours share a door). Next room on the way from a to b.
+local ROOM_I = {}
+for i, r in ipairs(T.rooms) do ROOM_I[r] = i end
+function Training.nextRoom(a, b)
+  local i, j = ROOM_I[a], ROOM_I[b]
+  if not i or not j or i == j then return b end
+  return T.rooms[i + (j > i and 1 or -1)]
+end
+
+function Training.neighbours(room)
+  local i, out = ROOM_I[room], {}
+  if T.rooms[i - 1] then out[#out + 1] = T.rooms[i - 1] end
+  if T.rooms[i + 1] then out[#out + 1] = T.rooms[i + 1] end
+  return out
+end
+
 function Training.block(s)
-  for _, b in ipairs(SCHEDULE) do
+  for _, b in ipairs(s.schedule or SCHEDULE) do
     if s.clock >= b.start and s.clock < b.stop then return b end
   end
   return nil
@@ -100,7 +126,7 @@ function Training.coach(s)
   s.hype = s.hype + 1
   local a = s.activity
   local b = Training.block(s)
-  local key = (b and b.kind == "free" and "lunch") or (a.kind == "drill" and "drill") or
+  local key = (b and b.kind == "free" and "lunch") or (b and b.kind == "idle" and "other") or (a.kind == "drill" and "drill") or
               (a.kind == "exercise" and "gym") or (a.kind == "habit" and "rest") or "other"
   local line = pick(s.rng, T.coach.lines[key])
   if s.coachLine and s.coachLine.text == line then line = pick(s.rng, T.coach.lines[key]) end
@@ -110,9 +136,12 @@ function Training.coach(s)
 end
 
 -- His stats as the match's shot model reads them (levels; see src/data/athletes.lua).
+-- Untrained stats (reach, reaction, recovery) are 3 unless the owner (the career) sets
+-- s.statsHook(st) to fill them in.
 function Training.stats(s)
   local st = { reach = 3, reaction = 3, recovery = 3 }
   for name, sk in pairs(s.skills) do st[name] = sk.level end
+  if s.statsHook then s.statsHook(st) end
   return st
 end
 
@@ -246,8 +275,23 @@ end
 local function habit(s, name, def)
   def = def or T.habits[name] or T.free[name]
   local a = activity("habit", name, def.label, range(s.rng, def.dur), { energyUse = def.nap and "nap" or "rest" })
-  if name == "chat" then a.talkEvery, a.nextTalk = 2.6, 0.8 end
+  if name == "chat" or name == "deskchat" then a.talkEvery, a.nextTalk = 2.6, 0.8 end
   return a
+end
+
+-- One room on the way to `dest` (through the door to the next room). A walk that carries on
+-- from the last one starts at the door already, so it is shorter and he changes room sooner.
+-- switchAt: activity time he passes the door (s.location changes).
+local function walkToward(s, dest)
+  local last = s.activity
+  local on = last and last.kind == "walk" and last.to == s.location
+  local to = Training.nextRoom(s.location, dest)
+  local dur = on and T.walkOn or T.walk
+  local switchAt = on and dur * 0.25 or dur / 2
+  -- only passing through the next room: walk on across it to its far door
+  if to ~= dest then dur = switchAt + T.walkAcross end
+  return activity("walk", dest, "Walking to the " .. dest, dur,
+    { to = to, from = s.location, final = dest, switchAt = switchAt, energyUse = "rest" })
 end
 
 -- Weighted random pick from { { w, make } }.
@@ -297,6 +341,8 @@ local function nextActivity(s)
 
   local b = Training.block(s)
   if not b then
+    -- day over: out through the room he arrived in
+    if s.arriveAt and s.location ~= s.arriveAt then return walkToward(s, s.arriveAt) end
     return activity("home", "home", "Heading home", 5, { energyUse = "rest" })
   end
   -- napping through the end of lunch
@@ -306,10 +352,9 @@ local function nextActivity(s)
     Training.say(s, "overslept")
     return a
   end
-  if b.loc ~= s.location then
+  if b.loc and b.loc ~= s.location then
     s.music = false
-    return activity("walk", b.loc, b.loc == "gym" and "Walking to the gym" or "Walking to the court", T.walk,
-      { to = b.loc, from = s.location, energyUse = "rest" })
+    return walkToward(s, b.loc)
   end
 
   local pool = {}
@@ -335,6 +380,13 @@ local function nextActivity(s)
     end
   elseif b.kind == "free" then
     addHabits(s, pool, FREE)
+  elseif b.kind == "idle" then
+    -- free time: whatever this room offers, or off through a door
+    addHabits(s, pool, HABITS)
+    local near = Training.neighbours(s.location)
+    for _, r in ipairs(near) do
+      pool[#pool + 1] = { T.wander / #near, function() return walkToward(s, r) end }
+    end
   end
   return choose(s, pool)
 end
@@ -362,11 +414,11 @@ end
 local function newDay(s)
   s.day = s.day + 1
   s.energy = 1
-  local first = SCHEDULE[1]
-  s.location = first.loc
+  local first = (s.schedule or SCHEDULE)[1]
+  s.location = s.arriveAt or first.loc or T.rooms[1]
   s.clock = first.start + range(s.rng, T.lateMorning)
   s.music = false
-  local a = activity("arrive", first.loc, "Arriving", 4, { energyUse = "rest" })
+  local a = activity("arrive", s.location, "Arriving", 4, { energyUse = "rest" })
   start(s, a)
   if s.clock > first.start + 3 then Training.say(s, "late") end
 end
@@ -394,14 +446,15 @@ local function advance(s, a, dt)
     s.energy = math.max(0, s.energy - drain * dt)
   end
 
-  if a.kind == "walk" and not a.switched and a.t >= a.dur / 2 then
+  if a.kind == "walk" and not a.switched and a.t >= (a.switchAt or a.dur / 2) then
     a.switched = true
     s.location = a.to
   end
   if a.talkEvery and a.t >= a.nextTalk then
     a.nextTalk = a.nextTalk + a.talkEvery
     a.talkWho = a.talkWho == "player" and "feeder" or "player"
-    Training.say(s, a.talkWho == "player" and "chat" or "feeder", a.talkWho)
+    local desk = a.name == "deskchat"
+    Training.say(s, a.talkWho == "player" and (desk and "deskchat" or "chat") or (desk and "desk" or "feeder"), a.talkWho)
   end
   -- the block ended mid-set: finish the rep in progress and stop there
   if a.nextStart and not a.cut and Training.block(s) ~= a.block then
@@ -446,18 +499,23 @@ end
 function Training.jumpTo(s, clock)
   s.clock = clock
   local b = Training.block(s)
-  if b then s.location = b.loc end
+  if b and b.loc then s.location = b.loc end
   s.forced, s.wantSulk, s.wantCelebrate, s.bubble, s.feederBubble = nil, false, false, nil, nil
   s.activity = nil
   start(s, nextActivity(s))
 end
 
+-- opts: rng, clock (jump there), schedule (from Training.buildSchedule; default: the demo's
+-- T.schedule), start (stat -> starting level; default T.start), statsHook (see Training.stats),
+-- arriveAt (room he comes in through every morning and leaves by; default the first block's).
+-- Blocks of kind "idle" (no loc) are free time: he stays where he is and does his own thing.
 function Training.new(opts)
   opts = opts or {}
   local s = { rng = opts.rng or math.random, day = 0, events = {}, log = {}, skills = {},
               energy = 1, missStreak = 0, perfectStreak = 0, setsDone = 0, totalReps = 0, hype = 0, pace = 1,
-              music = false }
-  for name, level in pairs(T.start) do s.skills[name] = { level = level, progress = 0 } end
+              music = false, schedule = opts.schedule or SCHEDULE, statsHook = opts.statsHook,
+              arriveAt = opts.arriveAt }
+  for name, level in pairs(opts.start or T.start) do s.skills[name] = { level = level, progress = 0 } end
   newDay(s)
   if opts.clock then Training.jumpTo(s, opts.clock) end
   return s

@@ -9,6 +9,17 @@ function Draw.color(c, alpha)
   love.graphics.setColor(c[1], c[2], c[3], alpha or c[4] or 1)
 end
 
+-- Text centred in a box (x, y, w, h) without the outline: for signs and labels in the world
+-- (dark text on a light wall, light text on a coloured plate). Pixel-snapped.
+function Draw.sign(str, x, y, w, h, color, font)
+  font = font or Assets.fonts.small
+  love.graphics.setFont(font)
+  Draw.color(color or C.text)
+  -- centre the capitals: the line height includes room below the baseline
+  local ty = math.floor(y + (h - font:getHeight()) / 2 - font:getDescent() / 2 + 0.5)
+  love.graphics.printf(str, math.floor(x + 0.5), ty, math.floor(w + 0.5), "center")
+end
+
 -- Text with a 1px dark outline so it reads on any background.
 function Draw.text(str, x, y, color, font, align, width)
   font = font or Assets.fonts.normal
